@@ -39,7 +39,9 @@ def ambiente(tmp_path, monkeypatch):
     monkeypatch.setattr(exportar, "ESTADO", tmp_path / "agregados" / "estado.json")
     monkeypatch.setattr(exportar, "ZIPS", tmp_path / "zips")
     manifest = tmp_path / "manifest.csv"
-    manifest.write_text("arquivo,dias\ncamada=viirs_noaa20/ano=2026/mes=11/NRT_2026-11-01.parquet,2\n", encoding="utf-8")
+    manifest.write_text("quando_utc,arquivo,dias\n"
+                        "2026-11-02T20:00:00+00:00,camada=viirs_noaa20/ano=2026/mes=11/NRT_2026-11-01.parquet,2\n",
+                        encoding="utf-8")
     monkeypatch.setattr(agregar, "MANIFEST", manifest)
     monkeypatch.setattr(focos, "ESTADO_FOCOS", tmp_path / "focos.json")
     tabela = pd.DataFrame({"iso3": ["BOL", "PRT"], "name": ["Bolivia", "Portugal"], "continent": ["South America", "Europe"]})
@@ -106,6 +108,9 @@ def test_k_por_bloco_e_harmonizada_por_regime(ambiente, monkeypatch):
     cobertura = pd.read_csv(saida / "meta/coverage.csv", keep_default_na=False).set_index(["layer", "processing"])
     assert cobertura.loc[("modis", "sp"), "first_date"] == "2012-03-01"
     assert cobertura.loc[("modis", "sp"), "rows"] == 2018
+    assert cobertura.loc[("modis", "sp"), "complete_date"] == cobertura.loc[("modis", "sp"), "last_date"]
+    assert cobertura.loc[("viirs_noaa20", "nrt"), "last_date"] == "2026-11-02"
+    assert cobertura.loc[("viirs_noaa20", "nrt"), "complete_date"] == "2026-11-01"
     noaa20 = pd.read_csv(saida / "points/viirs_noaa20/2026/2026-11-02.csv.gz", keep_default_na=False)
     assert len(noaa20) == 2 and noaa20["country"].tolist() == ["PRT", "PRT"] and noaa20["processing"].iloc[0] == "NRT"
     assert not (saida / "points/viirs_noaa20/2026/2026-11-03.csv.gz").exists()

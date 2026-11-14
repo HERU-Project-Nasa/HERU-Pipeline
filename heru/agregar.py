@@ -13,6 +13,7 @@ from heru.tarefas import fim_da_janela, fim_do_mes
 
 AGREGADOS = DATA / "agregados"
 MANIFEST = config.MANIFEST
+ATRASO_NRT = pd.Timedelta(hours=6)
 TABELAS = ["grade", "dia", "dia_k", "mes_pb", "cobertura", "paises", "fontes"]
 COLUNAS_LIDAS = ["camada", "processamento", "latitude", "longitude", "acq_date", "daynight", "type", "country"]
 FIM_K = pd.Timestamp("2012-01-01")
@@ -190,19 +191,29 @@ def grade_por_bloco(arquivos, camadas, janela):
     return pd.concat(partes, ignore_index=True).groupby(["layer", "month", "bi", "bj", "dn"])["n"].sum().reset_index()
 
 
-def dias_baixados():
+def baixados():
     if not MANIFEST.exists():
         return {}
-    tabela = pd.read_csv(MANIFEST, usecols=["arquivo", "dias"], dtype={"arquivo": str})
-    return dict(zip(tabela["arquivo"], tabela["dias"].astype(int)))
+    tabela = pd.read_csv(MANIFEST, usecols=["quando_utc", "arquivo", "dias"], dtype={"arquivo": str})
+    quando = pd.to_datetime(tabela["quando_utc"], utc=True).dt.tz_convert(None)
+    return {a: (int(d), q) for a, d, q in zip(tabela["arquivo"], tabela["dias"], quando)}
+
+
+def fechado_em(quando):
+    return (quando - ATRASO_NRT).normalize() - pd.Timedelta(days=1)
 
 
 def dias_do_arquivo(arquivo, baixados):
     texto = arquivo.stem.split("_")[-1]
     if len(texto) == 7:
         inicio = date.fromisoformat(texto + "-01")
-        return pd.Timestamp(inicio), pd.Timestamp(fim_do_mes(inicio))
+        fim = pd.Timestamp(fim_do_mes(inicio))
+        return pd.Timestamp(inicio), fim, fim
     inicio = date.fromisoformat(texto)
-    dias = baixados.get(arquivo.relative_to(PONTOS).as_posix())
-    fim = inicio + timedelta(days=dias - 1) if dias else fim_da_janela(inicio)
-    return pd.Timestamp(inicio), pd.Timestamp(fim)
+    dias, quando = baixados.get(arquivo.relative_to(PONTOS).as_posix(), (None, None))
+    fim = pd.Timestamp(inicio + timedelta(days=dias - 1) if dias else fim_da_janela(inicio))
+    if eh_sp(arquivo):
+        return pd.Timestamp(inicio), fim, fim
+    if quando is None:
+        quando = pd.Timestamp(arquivo.stat().st_mtime, unit="s")
+    return pd.Timestamp(inicio), fim, min(fim, fechado_em(quando))

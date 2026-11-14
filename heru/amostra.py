@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from heru import contar
+from heru import agregar, contar
 from heru.config import CAMADAS, CELULA, COLUNAS_VALIDACAO, INFO_CAMADAS, SAIDA
 from heru.focos import formatar_pontos
 from heru.fronteira import Fronteira, chave_fina, ler_paises, tabela_paises
@@ -57,7 +57,7 @@ def contar_validos(df, chave):
 
 def percorrer(store, fronteira, meses_grade, dia_pontos):
     fontes, mascara = set(), None
-    cobertura, paises, diario, grade, pontos = [], [], [], [], []
+    cobertura, paises, diario, grade, pontos, fechados = [], [], [], [], [], []
     for arquivo in arquivos_do_store(store):
         df = ler(arquivo)
         if df.empty:
@@ -75,6 +75,10 @@ def percorrer(store, fronteira, meses_grade, dia_pontos):
                 mascara = np.fromiter(fontes, dtype=np.int64, count=len(fontes))
             valido = ~np.isin(fina, mascara)
         cobertura.append(resumo(df, ["camada", "processamento"]))
+        fim = df["acq_date"].max()
+        fechado = fim if sp.any() else min(fim, agregar.fechado_em(pd.Timestamp(arquivo.stat().st_mtime, unit="s")))
+        if fechado >= df["acq_date"].min():
+            fechados.append((df["camada"].iloc[0], df["processamento"].iloc[0], fechado))
         paises.append(resumo(df, ["country"]))
         validos = df[valido]
         diario.append(contar_validos(validos, ["acq_date", "country", "camada", "daynight"]))
@@ -89,6 +93,9 @@ def percorrer(store, fronteira, meses_grade, dia_pontos):
         print(f"{arquivo.parent.parent.parent.name} {arquivo.name}: {len(df):,} focos")
     cobertura = juntar_resumos(cobertura, ["camada", "processamento"])
     cobertura = cobertura.rename(columns={"camada": "layer", "processamento": "processing"})
+    fechado = pd.DataFrame(fechados, columns=["layer", "processing", "complete_date"])
+    cobertura = cobertura.merge(fechado.groupby(["layer", "processing"])["complete_date"].max().reset_index(),
+                                on=["layer", "processing"], how="left")
     return {
         "cobertura": cobertura,
         "paises": juntar_resumos(paises, ["country"]),
@@ -107,7 +114,8 @@ def publicar_meta(lote, dados, tabela):
     cobertura = dados["cobertura"].sort_values(["layer", "processing"], ignore_index=True)
     lote.publicar("meta/coverage.csv", cobertura.assign(
         first_date=texto_data(cobertura["first_date"]), last_date=texto_data(cobertura["last_date"]),
-        updated_at=agora()), "meta")
+        complete_date=texto_data(cobertura["complete_date"]), updated_at=agora())[
+        ["layer", "processing", "first_date", "last_date", "rows", "updated_at", "complete_date"]], "meta")
     paises = tabela.merge(dados["paises"].rename(columns={"country": "iso3"}), on="iso3", how="left")
     paises["rows"] = paises["rows"].fillna(0).astype(int)
     paises["first_date"] = texto_data(paises["first_date"])

@@ -123,10 +123,10 @@ def contribuicoes(dia_k, fatores):
 
 
 def cobertos(arquivos):
-    baixados = agregar.dias_baixados()
+    baixados = agregar.baixados()
     linhas = [(agregar.camada_do_arquivo(a), "sp" if agregar.eh_sp(a) else "nrt", *agregar.dias_do_arquivo(a, baixados))
               for a in arquivos]
-    return pd.DataFrame(linhas, columns=["layer", "processing", "inicio", "fim"])
+    return pd.DataFrame(linhas, columns=["layer", "processing", "inicio", "fim", "fechado"])
 
 
 def calendario(trechos):
@@ -159,6 +159,14 @@ def continuo(trechos, cobertura):
         comeco = base + pd.Timedelta(days=int(buracos[-1]) + 1) if len(buracos) else base
         inicios.append(max(comeco, primeiro))
     return cobertura.assign(first_date=inicios)
+
+
+def fechados(trechos, cobertura):
+    ultimo = trechos[trechos["fechado"] >= trechos["inicio"]].groupby(["layer", "processing"])["fechado"].max()
+    chave = pd.MultiIndex.from_arrays([cobertura["layer"], cobertura["processing"]])
+    fechado = pd.Series(ultimo.reindex(chave).to_numpy(), index=cobertura.index)
+    fim = pd.to_datetime(cobertura["last_date"])
+    return cobertura.assign(complete_date=fechado.where(fechado.isna() | (fechado <= fim), fim))
 
 
 def marcas_mensais(operando_mensal):
@@ -264,8 +272,9 @@ def meta(lote, cobertura, paises_resumo, tabela, validacao, mascara, gravacoes):
     cob = cobertura.assign(updated_at=[gravacoes.get((int(c), p), "") for c, p in zip(cobertura["layer"], cobertura["processing"])])
     cob = cob.assign(layer=cob["layer"].map(lambda c: CAMADAS[int(c)])).sort_values(["layer", "processing"], ignore_index=True)
     lote.publicar("meta/coverage.csv", cob.assign(first_date=texto_data(cob["first_date"]),
-                                                  last_date=texto_data(cob["last_date"]))[
-        ["layer", "processing", "first_date", "last_date", "rows", "updated_at"]], "meta")
+                                                  last_date=texto_data(cob["last_date"]),
+                                                  complete_date=texto_data(cob["complete_date"]))[
+        ["layer", "processing", "first_date", "last_date", "rows", "updated_at", "complete_date"]], "meta")
     paises = tabela.merge(paises_resumo.rename(columns={"country": "iso3"}), on="iso3", how="left")
     paises["rows"] = paises["rows"].fillna(0).astype(int)
     paises["first_date"] = texto_data(paises["first_date"])
@@ -295,7 +304,7 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
     marcas = marcas_mensais(operando_mensal)
     cobertura = agregar.resumir(arquivos, "cobertura", ["layer", "processing"])
     cobertura["layer"] = cobertura["layer"].astype(int)
-    cobertura = continuo(trechos, cobertura)
+    cobertura = fechados(trechos, continuo(trechos, cobertura))
     blocos = agregar.grade_por_bloco(arquivos, [harmonizar.MODIS, harmonizar.SNPP, harmonizar.NOAA20],
                                      (harmonizar.JANELA_K[0], harmonizar.JANELA_K20[1]))
     fatores = harmonizar.calcular(blocos, ZIPS)

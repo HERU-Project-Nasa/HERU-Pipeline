@@ -11,7 +11,7 @@ from heru.config import CAMADAS, COLUNAS_CONTAGEM, COLUNAS_PONTOS, COLUNAS_VALID
 CABECALHOS = {
     "meta/latest.csv": ["batch", "updated_at"],
     "meta/files.csv": ["path", "kind", "period", "rows", "bytes", "sha256", "updated_at"],
-    "meta/coverage.csv": ["layer", "processing", "first_date", "last_date", "rows", "updated_at"],
+    "meta/coverage.csv": ["layer", "processing", "first_date", "last_date", "rows", "updated_at", "complete_date"],
     "meta/countries.csv": ["iso3", "name", "continent", "first_date", "last_date", "rows"],
     "meta/layers.csv": ["layer", "title", "instrument", "resolution_m", "satellites", "notes"],
     "meta/validation.csv": COLUNAS_VALIDACAO,
@@ -126,6 +126,9 @@ def conferir(saida=SAIDA, limite_pontos=200):
     if "meta/files.csv" not in do_lote or not all((saida / r).exists() for r in do_lote):
         problemas.append(f"lote {lote}: lista com arquivo ausente ou sem meta/files.csv")
     cobertura = lidos["meta/coverage.csv"][1]
+    fechada = cobertura[cobertura["complete_date"] != ""]
+    if ((fechada["complete_date"] < fechada["first_date"]) | (fechada["complete_date"] > fechada["last_date"])).any():
+        problemas.append("meta/coverage.csv: complete_date fora de first_date..last_date")
     paises = lidos["meta/countries.csv"][1]
     total = cobertura["rows"].astype(int).sum()
     com_pais = paises["rows"].astype(int).sum()
