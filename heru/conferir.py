@@ -13,7 +13,7 @@ CABECALHOS = {
     "meta/latest.csv": ["batch", "updated_at"],
     "meta/files.csv": ["path", "kind", "period", "rows", "bytes", "sha256", "updated_at"],
     "meta/coverage.csv": ["layer", "processing", "first_date", "last_date", "rows", "updated_at", "complete_date"],
-    "meta/countries.csv": ["iso3", "name", "continent", "first_date", "last_date", "rows"],
+    "meta/countries.csv": ["iso3", "name", "continent", "first_date", "last_date", "rows", "area_km2", "area_source"],
     "meta/layers.csv": ["layer", "title", "instrument", "resolution_m", "satellites", "notes"],
     "meta/validation.csv": COLUNAS_VALIDACAO,
     "meta/validation_monthly.csv": COLUNAS_VALIDACAO_MENSAL,

@@ -9,6 +9,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from heru import agregar, focos, harmonizar
+from heru.area import ler_areas
 from heru.baixar import avisar, manter_acordado, trava
 from heru.config import CAMADAS, CELULA, COLUNAS_CONTAGEM, COM_PASSAGEM, DATA, FONTES, INFO_CAMADAS, SAIDA
 from heru.fronteira import ler_paises, tabela_paises
@@ -295,10 +296,12 @@ def meta(lote, cobertura, paises_resumo, tabela, validacao, validacao_mensal, ma
                                                   complete_date=texto_data(cob["complete_date"]))[
         ["layer", "processing", "first_date", "last_date", "rows", "updated_at", "complete_date"]], "meta")
     paises = tabela.merge(paises_resumo.rename(columns={"country": "iso3"}), on="iso3", how="left")
+    paises = paises.merge(ler_areas(), on="iso3", how="left").fillna({"area_km2": "", "area_source": ""})
     paises["rows"] = paises["rows"].fillna(0).astype(int)
     paises["first_date"] = texto_data(paises["first_date"])
     paises["last_date"] = texto_data(paises["last_date"])
-    lote.publicar("meta/countries.csv", paises[["iso3", "name", "continent", "first_date", "last_date", "rows"]], "meta")
+    lote.publicar("meta/countries.csv", paises[["iso3", "name", "continent", "first_date", "last_date", "rows", "area_km2",
+                                                "area_source"]], "meta")
     lote.publicar("meta/layers.csv", pd.DataFrame(INFO_CAMADAS, columns=["layer", "title", "instrument", "resolution_m",
                                                                          "satellites", "notes"]), "meta")
     lote.publicar("meta/validation.csv", validacao, "meta")

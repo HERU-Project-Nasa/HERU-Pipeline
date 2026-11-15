@@ -124,6 +124,8 @@ def test_k_por_bloco_e_harmonizada_por_regime(ambiente, monkeypatch):
     todos = pd.read_csv(saida / "series/countries_yearly.csv", keep_default_na=False, dtype={"year": str})
     assert todos["iso3"].unique().tolist() == ["BOL", "PRT"]
     assert todos[todos["iso3"] == "BOL"].drop(columns="iso3").set_index("year").equals(anual)
+    paises = pd.read_csv(saida / "meta/countries.csv", keep_default_na=False).set_index("iso3")
+    assert paises.loc["BOL", "area_source"] == "world_bank" and float(paises.loc["BOL", "area_km2"]) > 1e6
     assert conferir(saida) == []
 
 
