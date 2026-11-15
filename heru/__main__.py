@@ -1,6 +1,6 @@
 import sys
 
-from heru import api, baixar, exportar, zips
+from heru import api, atualizar, baixar, exportar, zips
 
 
 def status(argv):
@@ -12,7 +12,8 @@ def status(argv):
     print(api.disponibilidade(chave).to_string(index=False))
 
 
-COMANDOS = {"historico": baixar.main, "zips": zips.main, "exportar": exportar.main, "status": status}
+COMANDOS = {"historico": baixar.main, "zips": zips.main, "exportar": exportar.main, "atualizar": atualizar.main,
+            "status": status}
 
 
 def main():
