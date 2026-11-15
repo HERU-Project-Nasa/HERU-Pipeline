@@ -8,7 +8,7 @@ User=heru
 Group=heru
 WorkingDirectory=/srv/heru/HERU-Pipeline
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/srv/heru/HERU-Pipeline/.venv/bin/python -m heru atualizar --a-cada 60 --tiles --horas-tiles 3 --minutos-pontos 15 --processos 3
+ExecStart=/srv/heru/HERU-Pipeline/.venv/bin/python -m heru atualizar --a-cada 10 --tiles --horas-tiles 3 --minutos-pontos 15 --processos 3
 Restart=always
 RestartSec=60
 KillSignal=SIGINT
