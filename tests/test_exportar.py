@@ -199,3 +199,24 @@ def test_dia_com_sp_nao_sai_do_nrt(tmp_path, monkeypatch):
     dias = {t["relativo"].split("/")[-1]: t["dias"] for t in focos.pendentes(arquivos, trechos, {})}
     assert dias["SP_2026-07-26.parquet"] == ["2026-07-26", "2026-07-27", "2026-07-28"]
     assert dias["NRT_2026-07-26.parquet"] == ["2026-07-29", "2026-07-30", "2026-07-31"]
+
+
+def test_mes_da_exportacao_que_quebrou_sai_na_seguinte(ambiente, monkeypatch):
+    saida = ambiente / "saida"
+    exportar.exportar(saida, aviso=lambda _: None, processos=1)
+    gravar(ambiente / "pontos", "modis", "SP_zip_2005-08", pd.concat([
+        pontos("modis", "SP", "2005-08-01", 25),
+        pontos("modis", "SP", "2005-08-02", 3, tipo=2, lat=40.0, lon=-8.0, pais="PRT")]))
+    original = exportar.grade_do_mes
+
+    def quebra(*args):
+        raise OSError("disco cheio")
+
+    monkeypatch.setattr(exportar, "grade_do_mes", quebra)
+    with pytest.raises(OSError):
+        exportar.exportar(saida, aviso=lambda _: None, processos=1)
+    assert json.loads(exportar.ESTADO.read_text(encoding="utf-8"))["meses_pendentes"] == [2005 * 12 + 7]
+    monkeypatch.setattr(exportar, "grade_do_mes", original)
+    exportar.exportar(saida, aviso=lambda _: None, processos=1)
+    assert pd.read_csv(saida / "grid/monthly/2005/2005-08.csv")["modis"].sum() == 25
+    assert "meses_pendentes" not in json.loads(exportar.ESTADO.read_text(encoding="utf-8"))

@@ -8,16 +8,17 @@ import pandas as pd
 import pyarrow.parquet as pq
 import requests
 
-from heru.baixar import avisar, gravar_parquet, manter_acordado, trava
-from heru.config import CAMADAS, DATA, PONTOS, ULTIMO_ANO_ZIP
+from heru.baixar import avisar, gravar_parquet, hoje_utc, manter_acordado, trava
+from heru.config import CAMADAS, DATA, PONTOS, ULTIMO_ANO_ZIP, ZIPS
 from heru.fronteira import Fronteira, ler_paises
 from heru.padronizar import CHAVE, ler_csv, padronizar
+from heru.tarefas import concluidos, ultimo_zip
 
-ZIPS = DATA / "zips"
 TRAVA_ZIPS = DATA / ".trava_zips"
 URL = "https://firms.modaps.eosdis.nasa.gov/data/country/zips/{nome}_{ano}_all_countries.zip"
 NOME_ZIP = {"modis": "modis", "viirs_snpp": "viirs-snpp"}
 PRIMEIRO_ANO = {"modis": 2000, "viirs_snpp": 2012}
+ULTIMO_ANO = {"viirs_snpp": 2026}
 INICIO_K20 = 2019
 MINIMO_CONCORDANCIA = 0.99
 
@@ -34,18 +35,16 @@ def marcador(camada, ano, pasta=ZIPS):
     return pasta / f"{camada}_{ano}.ok.json"
 
 
-def concluidos(pasta=ZIPS):
-    feitos = set()
-    for arquivo in pasta.glob("*.ok.json"):
-        camada, ano = arquivo.name.removesuffix(".ok.json").rsplit("_", 1)
-        feitos.add((camada, int(ano)))
-    return feitos
-
-
 def ordem(camadas=None, ultimo_ano=ULTIMO_ANO_ZIP):
-    lista = [(c, a) for c in camadas or NOME_ZIP for a in range(PRIMEIRO_ANO[c], ultimo_ano + 1)]
+    lista = [(c, a) for c in camadas or NOME_ZIP
+             for a in range(PRIMEIRO_ANO[c], min(ultimo_ano, ULTIMO_ANO.get(c, ultimo_ano)) + 1)]
     return sorted(lista, key=lambda t: (0 if t[0] == "viirs_snpp" and t[1] >= INICIO_K20 else 1,
                                         -t[1], CAMADAS.index(t[0])))
+
+
+def anos_novos(ano_fechado, pasta=ZIPS):
+    feitos = ultimo_zip(pasta)
+    return [(c, a) for c, a in ordem(ultimo_ano=ano_fechado) if a > feitos[c]]
 
 
 def baixar_zip(camada, ano, pasta=ZIPS, tentativas=3):
@@ -123,17 +122,29 @@ def juntar_meses(camada, ano, temporaria, pasta_pontos):
     return focos
 
 
+def trocar_pelo_zip(camada, ano, pasta_pontos=PONTOS):
+    pasta_ano = pasta_pontos / f"camada={camada}" / f"ano={ano}"
+    meses = {a.parent for a in pasta_ano.glob("mes=*/SP_zip_*.parquet")}
+    velhos = sorted(a for a in pasta_ano.glob("mes=*/*.parquet")
+                    if a.parent in meses and not a.name.startswith("SP_zip_"))
+    for arquivo in velhos:
+        arquivo.unlink()
+    return velhos
+
+
 def processar(camada, ano, fronteira, pasta_zip=ZIPS, pasta_pontos=PONTOS):
     caminho = baixar_zip(camada, ano, pasta_zip)
     temporaria = pasta_zip / f"tmp_{camada}_{ano}"
     shutil.rmtree(temporaria, ignore_errors=True)
     tabela, lidos = separar_por_mes(caminho, camada, fronteira, temporaria)
     focos = juntar_meses(camada, ano, temporaria, pasta_pontos)
+    trocados = trocar_pelo_zip(camada, ano, pasta_pontos)
     tabela.sort_values("arquivo").to_csv(pasta_zip / f"{camada}_{ano}_paises.csv", index=False)
     grandes = tabela[tabela["focos"] > 1000]
     abaixo = grandes[grandes["concordancia"] < MINIMO_CONCORDANCIA]
     info = {"camada": camada, "ano": ano, "focos": focos, "repetidos_entre_paises": lidos - focos,
-            "arquivos": len(tabela), "abaixo_de_99": abaixo[["arquivo", "iso3", "concordancia"]].to_dict("records")}
+            "arquivos": len(tabela), "trocados": len(trocados),
+            "abaixo_de_99": abaixo[["arquivo", "iso3", "concordancia"]].to_dict("records")}
     marcador(camada, ano, pasta_zip).write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
     shutil.rmtree(temporaria, ignore_errors=True)
     caminho.unlink()
@@ -146,7 +157,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     camadas = args.camadas.split(",") if args.camadas else None
     feitos = concluidos()
-    pendentes = [t for t in ordem(camadas) if t not in feitos]
+    pendentes = [t for t in ordem(camadas, hoje_utc().year - 1) if t not in feitos]
     print(f"{len(pendentes)} anos de zip pendentes: " + ", ".join(f"{c} {a}" for c, a in pendentes), flush=True)
     if not pendentes:
         return
@@ -162,4 +173,5 @@ def main(argv=None):
                 continue
             abaixo = ", ".join(f"{a['iso3']} {a['concordancia']:.3f}" for a in info["abaixo_de_99"]) or "nenhum"
             avisar(f"{camada} {ano}: {info['focos']:,} focos de {info['arquivos']} arquivos, "
-                   f"{info['repetidos_entre_paises']:,} repetidos, abaixo de 99%: {abaixo}, {time.time() - inicio:.0f} s")
+                   f"{info['repetidos_entre_paises']:,} repetidos, {info['trocados']} arquivos da API e do NRT "
+                   f"trocados, abaixo de 99%: {abaixo}, {time.time() - inicio:.0f} s")

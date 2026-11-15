@@ -1,8 +1,10 @@
-from datetime import date, timedelta
+import os
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+import pytest
 
 from heru import api, baixar, tarefas
 from heru.cota import Cota
@@ -45,6 +47,20 @@ def test_zip_cobre_modis_e_snpp_ate_2025():
     sp_zip = [t for t in lista if t.camada in ("modis", "viirs_snpp") and t.processamento == "SP"]
     assert min(t.inicio for t in sp_zip) == date(2026, 1, 1)
     assert max(t.fim for t in lista if t.camada == "viirs_snpp") == date(2026, 11, 2)
+
+
+def test_ano_com_zip_sai_do_sp_e_do_nrt_da_api():
+    lista = tarefas.plano(DISP, HOJE, zips_ate={"modis": 2026, "viirs_snpp": 2026})
+    assert not [t for t in lista if t.camada in ("modis", "viirs_snpp")]
+    antes = [t for t in tarefas.plano(DISP, HOJE) if t.camada not in ("modis", "viirs_snpp")]
+    assert [t for t in lista if t.camada not in ("modis", "viirs_snpp")] == antes
+
+
+def test_ultimo_zip_vem_dos_marcadores(tmp_path):
+    assert tarefas.ultimo_zip(tmp_path) == {"modis": 2025, "viirs_snpp": 2025}
+    for nome in ("modis_2025", "modis_2026", "viirs_snpp_2024"):
+        (tmp_path / f"{nome}.ok.json").write_text("{}")
+    assert tarefas.ultimo_zip(tmp_path) == {"modis": 2026, "viirs_snpp": 2025}
 
 
 def test_ordem_traz_o_noaa20_de_2019_antes_do_noaa21():
@@ -121,3 +137,38 @@ def test_janela_com_foco_fora_do_periodo_falha(tmp_path, monkeypatch):
                                     tmp_path, tmp_path / "manifest.csv")
     assert gasto == 0 and falhas == [tarefa]
     assert not tarefas.caminho_arquivo(tarefa, tmp_path).exists()
+
+
+def agora():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def test_processo_vivo_pelo_pid():
+    assert baixar.processo_vivo(os.getpid())
+    assert not baixar.processo_vivo(99_999_999)
+
+
+def test_trava_de_processo_vivo_segura_a_execucao(tmp_path):
+    caminho = tmp_path / ".trava"
+    caminho.write_text(f"{os.getpid()} {agora()}\n")
+    with pytest.raises(SystemExit):
+        with baixar.trava(caminho):
+            pass
+    assert caminho.exists()
+
+
+def test_trava_de_processo_morto_e_apagada(tmp_path, monkeypatch):
+    caminho = tmp_path / ".trava"
+    caminho.write_text(f"4242 {agora()}\n")
+    monkeypatch.setattr(baixar, "processo_vivo", lambda pid: False)
+    with baixar.trava(caminho):
+        assert caminho.read_text().split()[0] == str(os.getpid())
+    assert not caminho.exists()
+
+
+def test_trava_de_antes_do_boot_e_apagada_mesmo_com_pid_reusado(tmp_path, monkeypatch):
+    caminho = tmp_path / ".trava"
+    caminho.write_text(f"{os.getpid()} 2026-11-15T05:00:00+00:00\n")
+    monkeypatch.setattr(baixar, "ligado_desde", lambda: datetime(2026, 11, 15, 6, 0, tzinfo=timezone.utc))
+    with baixar.trava(caminho):
+        assert caminho.read_text().split()[1] != "2026-11-15T05:00:00+00:00"

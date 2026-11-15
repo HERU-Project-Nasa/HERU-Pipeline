@@ -312,7 +312,10 @@ def meta(lote, cobertura, paises_resumo, tabela, validacao, validacao_mensal, ma
 
 
 def ler_estado():
-    return json.loads(ESTADO.read_text(encoding="utf-8")) if ESTADO.exists() else {}
+    try:
+        return json.loads(ESTADO.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_pontos=15, processos=3):
@@ -340,6 +343,9 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
         antigas = estado.get("meses", {})
         mudaram = {agregar.mes_numero_texto(m) for m, v in marcas.items() if antigas.get(m) != v}
         tocados = {agregar.mes_do_arquivo(a) for a in novos} | (mudaram & todos_meses)
+    tocados |= set(estado.get("meses_pendentes", [])) & todos_meses
+    if tocados:
+        ESTADO.write_text(json.dumps({**estado, "meses_pendentes": sorted(tocados)}), encoding="utf-8")
     aviso(f"fatores: {assinatura}; {len(tocados)} meses para reescrever")
     lote = Lote(ultimo_lote(saida) + 1, saida, anteriores)
     for mes in sorted(tocados):

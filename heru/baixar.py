@@ -5,7 +5,8 @@ import os
 import sys
 import time
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import requests
 
@@ -34,9 +35,53 @@ def manter_acordado():
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
 
 
+def processo_vivo(pid):
+    if sys.platform == "win32":
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        alca = kernel32.OpenProcess(0x1000, False, pid)
+        if not alca:
+            return ctypes.get_last_error() == 5
+        codigo = ctypes.c_ulong()
+        ativo = kernel32.GetExitCodeProcess(alca, ctypes.byref(codigo)) and codigo.value == 259
+        kernel32.CloseHandle(alca)
+        return bool(ativo)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def ligado_desde():
+    if sys.platform == "win32":
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+        segundos = kernel32.GetTickCount64() / 1000
+    else:
+        segundos = float(Path("/proc/uptime").read_text().split()[0])
+    return datetime.now(timezone.utc) - timedelta(seconds=segundos)
+
+
+def trava_velha(caminho):
+    try:
+        pid, quando = caminho.read_text(encoding="utf-8").split()[:2]
+        return not processo_vivo(int(pid)) or datetime.fromisoformat(quando) < ligado_desde()
+    except (OSError, ValueError):
+        return False
+
+
 @contextmanager
 def trava(caminho=TRAVA):
     caminho.parent.mkdir(parents=True, exist_ok=True)
+    if caminho.exists() and trava_velha(caminho):
+        avisar(f"trava velha apagada: {caminho.name} ({caminho.read_text(encoding='utf-8').strip()})")
+        caminho.unlink(missing_ok=True)
     try:
         with open(caminho, "x", encoding="utf-8") as f:
             f.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
@@ -164,7 +209,7 @@ def main(argv=None):
     if not chave:
         sys.exit("sem MAP_KEY: crie .env com MAP_KEY=sua_chave")
     camadas = args.camadas.split(",") if args.camadas else None
-    todas = tarefas.plano(api.disponibilidade(chave), hoje_utc(), camadas, args.inicio, args.fim)
+    todas = tarefas.plano(api.disponibilidade(chave), hoje_utc(), camadas, args.inicio, args.fim, tarefas.ultimo_zip())
     pendentes = tarefas.pendentes(todas)
     resumo(todas, pendentes)
     if args.simular or not pendentes:
