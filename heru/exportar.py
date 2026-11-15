@@ -324,10 +324,12 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
         lote.publicar(f"grid/monthly/{texto[:4]}/{texto}.csv", grade_do_mes(arquivos, mes, fatores, operando_mensal.loc[texto]),
                       "grid", texto)
     ultimo_tiles = estado.get("tiles", 0)
+    tiles_pendentes = bool(tocados) or estado.get("tiles_pendentes", True)
     vencido = time.time() - ultimo_tiles >= horas_tiles * 3600 or assinatura != estado.get("fatores")
-    if com_tiles and tocados and vencido:
+    if com_tiles and tiles_pendentes and vencido:
         tiles(arquivos, todos_meses, fatores, operando_mensal, lote, aviso)
         ultimo_tiles = time.time()
+        tiles_pendentes = False
     dia = agregar.somar(arquivos, "dia", ["layer", "date", "country", "dn"])
     dia_k = agregar.somar(arquivos, "dia_k", ["layer", "date", "country", "bi", "bj", "dn"])
     mes_pb = agregar.somar(arquivos, "mes_pb", ["layer", "month", "country", "bi", "bj", "dn"])
@@ -347,7 +349,8 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
     meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, mascara, gravado_em(arquivos))
     publicou = lote.fechar()
     ESTADO.write_text(json.dumps({"fatores": assinatura, "lote": lote.numero if publicou else estado.get("lote"),
-                                     "meses": marcas, "tiles": ultimo_tiles}), encoding="utf-8")
+                                     "meses": marcas, "tiles": ultimo_tiles, "tiles_pendentes": tiles_pendentes}),
+                      encoding="utf-8")
     aviso(f"lote {lote.numero if publicou else '-'}: {len(lote.arquivos)} arquivos mudaram em {time.time() - inicio:.0f} s")
     if minutos_pontos:
         return focos.exportar_focos(arquivos, trechos, saida, minutos_pontos, processos, aviso)

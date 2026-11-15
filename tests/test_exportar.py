@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import numpy as np
@@ -38,6 +39,7 @@ def ambiente(tmp_path, monkeypatch):
     monkeypatch.setattr(agregar, "AGREGADOS", tmp_path / "agregados")
     monkeypatch.setattr(exportar, "ESTADO", tmp_path / "agregados" / "estado.json")
     monkeypatch.setattr(exportar, "ZIPS", tmp_path / "zips")
+    monkeypatch.setattr(harmonizar, "noaa20_pronto", lambda *a: False)
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("quando_utc,arquivo,dias\n"
                         "2026-11-02T20:00:00+00:00,camada=viirs_noaa20/ano=2026/mes=11/NRT_2026-11-01.parquet,2\n",
@@ -125,6 +127,23 @@ def test_segunda_exportacao_sem_mudanca_nao_gera_lote(ambiente):
     assert pd.read_csv(ambiente / "saida/meta/latest.csv")["batch"].tolist() == [2]
     assert exportar.exportar(ambiente / "saida", aviso=lambda _: None, processos=1) is False
     assert pd.read_csv(ambiente / "saida/meta/latest.csv")["batch"].tolist() == [2]
+
+
+def test_tiles_atrasados_saem_quando_o_intervalo_vence(ambiente):
+    saida = ambiente / "saida"
+
+    def meses_do_tile():
+        return pd.read_csv(saida / "grid/tiles/-20_-65/monthly.csv", dtype={"month": str})["month"].tolist()
+
+    exportar.exportar(saida, com_tiles=True, horas_tiles=3, aviso=lambda _: None, processos=1)
+    gravar(ambiente / "pontos", "modis", "SP_zip_2012-04", pontos("modis", "SP", "2012-04-10", 7))
+    exportar.exportar(saida, com_tiles=True, horas_tiles=3, aviso=lambda _: None, processos=1)
+    assert "2012-04" not in meses_do_tile()
+    estado = json.loads(exportar.ESTADO.read_text(encoding="utf-8"))
+    exportar.ESTADO.write_text(json.dumps({**estado, "tiles": 0}), encoding="utf-8")
+    exportar.exportar(saida, com_tiles=True, horas_tiles=3, aviso=lambda _: None, processos=1)
+    assert "2012-04" in meses_do_tile()
+    assert json.loads(exportar.ESTADO.read_text(encoding="utf-8"))["tiles_pendentes"] is False
 
 
 def test_dia_com_sp_nao_sai_do_nrt(tmp_path, monkeypatch):
