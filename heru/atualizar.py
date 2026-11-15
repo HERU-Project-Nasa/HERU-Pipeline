@@ -8,7 +8,7 @@ import pyarrow.parquet as pq
 import requests
 
 from heru import agregar, api, baixar, exportar, tarefas
-from heru.config import FONTES, TRAVA
+from heru.config import CAMADAS, FONTES, TRAVA
 from heru.cota import Cota
 from heru.fronteira import Fronteira, ler_paises
 from heru.padronizar import CHAVE, ler_csv, padronizar
@@ -81,7 +81,47 @@ def mesclar(df, camada, quando):
     return gravadas
 
 
-def tempo_real(janela, fronteira, aviso):
+def fechado_ate(camada):
+    registro = agregar.baixados()
+    indice = CAMADAS.index(camada)
+    fechados = [agregar.dias_do_arquivo(a, registro)[2] for a in agregar.arquivos_do_store()
+                if agregar.camada_do_arquivo(a) == indice]
+    return max(fechados).date() if fechados else None
+
+
+def janelas_do_buraco(camada, fechado, primeiro):
+    if fechado is None or primeiro <= fechado:
+        return []
+    fonte = FONTES[camada]
+    lista = []
+    inicio = tarefas.inicio_da_janela(fechado + timedelta(days=1))
+    while inicio <= primeiro:
+        fim_janela = tarefas.fim_da_janela(inicio)
+        dias = (min(fim_janela, primeiro) - inicio).days + 1
+        lista.append(tarefas.Tarefa(camada, "NRT", fonte.nrt, fonte.area, inicio, dias, fim_janela, fonte.custo_dia * dias))
+        inicio = fim_janela + timedelta(days=1)
+    return lista
+
+
+def preencher_buraco(camada, primeiro, chave, fronteira, aviso):
+    fechado = fechado_ate(camada)
+    lista = janelas_do_buraco(camada, fechado, primeiro)
+    if not lista:
+        return True
+    falta = fechado + timedelta(days=1)
+    aviso(f"{camada}: buraco de {falta} a {primeiro} fora do CSV de 7 dias; {len(lista)} janelas pela API, "
+          f"{sum(t.custo for t in lista):,} transações")
+    if not chave:
+        aviso(f"ATRASO: {camada} sem MAP_KEY para o buraco; rode historico --inicio {falta}")
+        return False
+    cota = Cota(aviso=aviso)
+    cota.sincronizar(api.status(chave).get("current_transactions", 0))
+    gasto, falhas = baixar.executar(lista, chave, cota, fronteira, agregar.PONTOS, agregar.MANIFEST)
+    aviso(f"{camada}: buraco preenchido com {gasto:,} transações, {len(falhas)} janelas com falha")
+    return not falhas
+
+
+def tempo_real(janela, fronteira, aviso, buraco=False, chave=None):
     quando = datetime.now(timezone.utc)
     ultimos = {}
     for camada in CSV_GLOBAIS:
@@ -97,6 +137,11 @@ def tempo_real(janela, fronteira, aviso):
             aviso(f"{camada}: CSV global de {janela} veio vazio")
             continue
         df["country"] = fronteira.paises(df["latitude"].to_numpy(), df["longitude"].to_numpy())
+        if buraco:
+            try:
+                preencher_buraco(camada, min(df["acq_date"]), chave, fronteira, aviso)
+            except (requests.RequestException, api.ErroAPI, ValueError) as erro:
+                aviso(f"ATRASO: {camada} com buraco que a API não preencheu ({erro})")
         gravadas = mesclar(df, camada, quando)
         ultimos[camada] = max(df["acq_date"])
         aviso(f"{camada}: {len(df):,} focos no CSV de {janela} ({antes - len(df):,} repetidos), "
@@ -144,9 +189,9 @@ def trocar_por_sp(chave, fronteira, aviso):
 
 def coletar(fronteira, diario, com_sp, aviso):
     hoje = baixar.hoje_utc()
-    ultimos = tempo_real("7d" if diario else "48h", fronteira, aviso)
+    chave = api.carregar_map_key() if diario else None
+    ultimos = tempo_real("7d" if diario else "48h", fronteira, aviso, buraco=diario, chave=chave)
     if diario and com_sp:
-        chave = api.carregar_map_key()
         if not chave:
             aviso("sem MAP_KEY: a troca do NRT pelo SP fica para depois")
         else:

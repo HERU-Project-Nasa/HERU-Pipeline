@@ -6,7 +6,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from heru import agregar, atualizar, exportar, tarefas
+from heru import agregar, atualizar, baixar, exportar, tarefas
 from heru.padronizar import ler_csv, padronizar
 from heru.publicar import Lote
 
@@ -41,6 +41,10 @@ def loja(tmp_path, monkeypatch):
 def janela(camada, inicio, processamento="NRT"):
     tarefa = tarefas.Tarefa(camada, processamento, "", "world", inicio, 5, tarefas.fim_da_janela(inicio), 0)
     return tarefas.caminho_arquivo(tarefa, agregar.PONTOS)
+
+
+def anotar_janela(quando, arquivo, dias):
+    baixar.anotar({"quando_utc": quando, "arquivo": arquivo, "dias": dias}, agregar.MANIFEST)
 
 
 def manifest_de(arquivo):
@@ -119,3 +123,53 @@ def test_recent_corta_pela_hora_da_passagem(loja):
     assert contagem["recent/viirs_snpp/24h.csv.gz"] == 0
     texto = gzip.decompress((saida / "recent/viirs_noaa20/48h.csv.gz").read_bytes()).decode()
     assert texto.splitlines()[1].startswith("-16.20000,-64.00000,2026-11-15,0600,viirs_noaa20,N20,BOL")
+
+
+def test_sem_buraco_quando_o_csv_comeca_antes_do_ultimo_dia_fechado():
+    assert atualizar.janelas_do_buraco("viirs_noaa20", date(2026, 11, 13), date(2026, 11, 8)) == []
+    assert atualizar.janelas_do_buraco("viirs_noaa20", None, date(2026, 11, 8)) == []
+
+
+def test_buraco_vira_janelas_alinhadas_ate_o_primeiro_dia_do_csv():
+    lista = atualizar.janelas_do_buraco("viirs_noaa20", date(2026, 11, 3), date(2026, 11, 12))
+    assert [(t.inicio, t.dias, t.custo) for t in lista] == [
+        (date(2026, 11, 1), 5, 180), (date(2026, 11, 6), 5, 180), (date(2026, 11, 11), 2, 72)]
+    assert {(t.processamento, t.fonte) for t in lista} == {("NRT", "VIIRS_NOAA20_NRT")}
+
+
+def test_buraco_maior_que_7_dias_vem_da_api_antes_do_csv(loja, monkeypatch):
+    destino = janela("viirs_noaa20", date(2026, 11, 1))
+    destino.parent.mkdir(parents=True)
+    viirs([(-15.0, "2026-11-01", "0100")], "api").to_parquet(destino, index=False)
+    anotar_janela("2026-11-04T12:00:00+00:00", "camada=viirs_noaa20/ano=2026/mes=11/NRT_2026-11-01.parquet", 4)
+    chamadas = []
+
+    def area(chave, fonte, area_txt, dias, data):
+        chamadas.append((data, dias))
+        inicio = date.fromisoformat(data)
+        return texto_viirs([(-15.0 - i / 10, (inicio + pd.Timedelta(days=i)).isoformat(), "0100") for i in range(dias)])
+
+    monkeypatch.setattr(atualizar.api, "area", area)
+    monkeypatch.setattr(atualizar.api, "status", lambda chave: {"current_transactions": 0})
+    monkeypatch.setattr(atualizar, "CSV_GLOBAIS", {"viirs_noaa20": ["x"]})
+    csv = texto_viirs([(-16.0 - i / 10, f"2026-11-{12 + i}", "0200") for i in range(5)])
+    monkeypatch.setattr(atualizar, "baixar_csv_global", lambda camada, janela: ler_csv(csv))
+    avisos = []
+    atualizar.tempo_real("7d", FronteiraFalsa(), avisos.append, buraco=True, chave="chave")
+    assert chamadas == [("2026-11-01", 5), ("2026-11-06", 5), ("2026-11-11", 2)]
+    assert any("buraco de 2026-11-04 a 2026-11-12" in a for a in avisos)
+    assert len(pq.ParquetFile(destino).read()) == 5
+    onze = janela("viirs_noaa20", date(2026, 11, 11))
+    assert len(pq.ParquetFile(onze).read()) == 6
+    assert manifest_de(onze)["dias"] == 5
+    assert atualizar.fechado_ate("viirs_noaa20") is not None
+
+
+def test_buraco_sem_map_key_so_avisa(loja, monkeypatch):
+    destino = janela("viirs_noaa20", date(2026, 11, 1))
+    destino.parent.mkdir(parents=True)
+    viirs([(-15.0, "2026-11-01", "0100")], "api").to_parquet(destino, index=False)
+    anotar_janela("2026-11-04T12:00:00+00:00", "camada=viirs_noaa20/ano=2026/mes=11/NRT_2026-11-01.parquet", 4)
+    avisos = []
+    assert atualizar.preencher_buraco("viirs_noaa20", date(2026, 11, 12), None, FronteiraFalsa(), avisos.append) is False
+    assert avisos[-1] == "ATRASO: viirs_noaa20 sem MAP_KEY para o buraco; rode historico --inicio 2026-11-04"
