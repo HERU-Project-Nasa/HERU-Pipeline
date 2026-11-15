@@ -51,6 +51,22 @@ Em 14/11/2026, o `historico` completo tinha 1.459 janelas e 191.080 transações
 - `points/{camada}/{aaaa}/{dia}.csv.gz` traz todos os focos do dia, de qualquer `type`; as contagens usam só o `type` 0 do SP e o NRT fora da máscara. Sai um arquivo para cada dia coberto, mesmo sem foco (só o cabeçalho). O dia que tem SP vem do SP; o NRT só preenche os dias sem SP. Os pontos são refeitos quando o arquivo do store muda (`data/agregados/focos.json`), saem num lote separado depois da grade e das séries, e cada exportação grava pontos por no máximo `--minutos-pontos` minutos, com `--processos` processos. Enquanto houver atraso, o loop não espera os N minutos.
 - Cada execução publica um lote só com os arquivos cujo sha256 mudou. `--tiles` refaz `grid/tiles/` (no máximo a cada `--horas-tiles` horas, ou quando os fatores mudam) e `--a-cada N` repete a exportação a cada N minutos.
 
+## Tempo real (Fase 4)
+
+```
+.venv\Scripts\python -m heru atualizar --a-cada 60 --tiles --horas-tiles 3 --minutos-pontos 15 --processos 3
+.venv\Scripts\python -m heru atualizar --diario
+```
+
+- A cada `--a-cada` minutos, `atualizar` baixa os CSVs globais de 48 h do FIRMS (MODIS, NOAA-20, NOAA-21 e Landsat de EUA e Canadá), que não gastam cota, e roda a mesma exportação do `exportar`. O S-NPP fica de fora: parou de observar em 02/11/2026 e o CSV dele vem vazio.
+- Os focos do CSV entram na janela NRT de 5 dias do store (`NRT_{inicio}.parquet`), a mesma que a API grava. A janela é lida, recebe os focos novos sem repetir a chave lat, lon, data, hora e satélite (o foco que já existia fica com os valores do CSV) e é regravada só quando ganhou foco ou dia. Cada regravação anota uma linha em `data/manifest.csv` com `origem` = `csv_global` e `dias` até o último dia do CSV, então o `complete_date` avança sozinho.
+- Uma vez por dia UTC (e na primeira execução, ou com `--diario`) entram os CSVs de 7 dias, para fechar buracos, e a troca do NRT pelo SP: lê o `data_availability`, baixa pela Area API as janelas SP novas (cerca de 1.100 transações por camada e mês) e apaga cada arquivo NRT cujos dias o SP já cobre por inteiro. Sem `MAP_KEY`, ou com `--sem-sp`, a troca fica para depois. O estado diário fica em `data/agregados/atualizar.json`.
+- Na mesma rodada diária, antes de juntar o CSV de 7 dias, cada camada confere o último dia fechado do store. Se o CSV começa depois dele (a pipeline ficou parada mais de 7 dias), as janelas NRT do buraco, do início da janela do primeiro dia que falta até o primeiro dia do CSV, vêm pela Area API, como no `historico`, e o CSV entra por cima. Custa 36 transações por dia de MODIS, NOAA-20 e NOAA-21 e 4 do Landsat, cerca de 112 por dia parado. Sem `MAP_KEY` sai uma linha `ATRASO` com o `historico --inicio` a rodar à mão.
+- Camada cujo CSV falhou ou cujo último dia está mais de 1 dia atrás de hoje gera uma linha `ATRASO` no log; o resto continua publicado.
+- `recent/{camada}/24h.csv.gz`, `48h.csv.gz` e `7d.csv.gz` saem a cada exportação com os focos NRT cuja passagem (`acq_date` + `acq_time`, UTC) cai nas últimas 24 h, 48 h ou 7 dias contadas da hora da exportação, nas mesmas colunas de `points/`. Camada sem foco no período sai só com o cabeçalho.
+- `atualizar` segura `data/.trava` e `data/.trava_exportar`: pare o loop antes de rodar `historico`, `zips` ou `exportar` à mão.
+- Os CSVs globais atrasam: às 05:10 UTC de 15/11/2026 o último foco do CSV de 24 h era de 14/11 às 23:39.
+
 ## Amostra da Fase 0
 
 ```
@@ -76,3 +92,4 @@ O que a amostra ainda não tem:
 ## Histórico do contrato
 
 - 14/11/2026: amostra da Fase 0 publicada.
+- 15/11/2026: Fase 4 no ar: `recent/` e lotes de hora em hora com os CSVs globais do FIRMS.

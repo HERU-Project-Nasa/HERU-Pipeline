@@ -88,7 +88,7 @@ def pontos_do_lote(saida, limite):
     if not lista.exists():
         return {}
     tabela = pd.read_csv(lista, dtype=str, keep_default_na=False)
-    tabela = tabela[tabela["path"].str.startswith(("points/", "recent/"))].sort_values("path")
+    tabela = tabela[tabela["path"].str.startswith("points/")].sort_values("path")
     passo = max(1, len(tabela) // limite)
     return dict(zip(tabela["path"].iloc[::passo], tabela["sha256"].iloc[::passo]))
 
@@ -103,7 +103,7 @@ def conferir(saida=SAIDA, limite_pontos=200):
             if caminho.name.startswith("."):
                 problemas.append(f"{relativo}: temporário esquecido")
                 continue
-            if relativo.startswith(("points/", "recent/")) and relativo not in amostra:
+            if relativo.startswith("points/") and relativo not in amostra:
                 continue
             lidos[relativo] = conferir_arquivo(relativo, caminho, problemas)
     for relativo, sha in amostra.items():
@@ -118,7 +118,7 @@ def conferir(saida=SAIDA, limite_pontos=200):
         if hashlib.sha256(corpo).hexdigest() != linha.sha256 or len(corpo) != int(linha.bytes):
             problemas.append(f"{linha.path}: sha256 ou bytes diferente de meta/files.csv")
     lote = lidos["meta/latest.csv"][1]["batch"].iloc[0]
-    publicados = {r for r in lidos if not r.startswith(("meta/batches/", "points/", "recent/")) and r != "meta/latest.csv"}
+    publicados = {r for r in lidos if not r.startswith(("meta/batches/", "points/")) and r != "meta/latest.csv"}
     catalogados = set(arquivos["path"]) | {"meta/files.csv"}
     if catalogados != publicados:
         problemas.append(f"meta/files.csv difere do publicado em {sorted(catalogados ^ publicados)[:5]}")
