@@ -71,6 +71,7 @@ Em 14/11/2026, o `historico` completo tinha 1.459 janelas e 191.080 transações
 - `recent/{camada}/24h.csv.gz`, `48h.csv.gz` e `7d.csv.gz` saem a cada exportação com os focos NRT cuja passagem (`acq_date` + `acq_time`, UTC) cai nas últimas 24 h, 48 h ou 7 dias contadas da hora da exportação, nas mesmas colunas de `points/`. Camada sem foco no período sai só com o cabeçalho.
 - `atualizar` segura `data/.trava` e `data/.trava_exportar`: pare o loop antes de rodar `historico`, `zips` ou `exportar` à mão. Uma trava cujo processo já morreu, ou gravada antes do último boot, é apagada sozinha na próxima execução, com uma linha `trava velha apagada` no log.
 - `--log ARQUIVO` acrescenta a saída nesse arquivo e os erros no `.err` ao lado, para rodar com `pythonw.exe`, sem console.
+- Um erro inesperado não derruba o loop. Falha na coleta de uma camada não impede as outras; falha na coleta inteira não impede a exportação; falha na exportação não impede a próxima rodada. Cada erro sai no log como `ERRO em {etapa}: {tipo}: {mensagem}; a pipeline segue`, com o traceback no `.err`. Se a rodada diária falhou, ela roda de novo na rodada seguinte. Os meses que uma exportação interrompida ia reescrever ficam em `meses_pendentes` (`data/agregados/estado.json`) e saem na exportação seguinte. Com `--a-cada 0`, a execução termina com código 1 quando houve erro.
 - Os CSVs globais atrasam: às 05:10 UTC de 15/11/2026 o último foco do CSV de 24 h era de 14/11 às 23:39.
 
 ### Início automático no Windows
@@ -88,7 +89,6 @@ $lnk.Save()
 ```
 
 - Depois de desligar ou reiniciar o PC, basta fazer login: o loop sobe sem janela e apaga as travas velhas. Sem login (por exemplo, parado na tela de entrada depois de uma atualização do Windows), nada roda.
-- Um erro não tratado ainda encerra o loop até o próximo login ou um início à mão (`Invoke-Item` no atalho).
 - Para parar: encerrar os dois processos `pythonw` (o PID do filho está em `data/.trava`). Para desligar o início automático, apagar o atalho.
 
 ## Amostra da Fase 0

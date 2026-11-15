@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -31,14 +32,21 @@ def caminho_estado():
 
 
 def ler_estado():
-    caminho = caminho_estado()
-    return json.loads(caminho.read_text(encoding="utf-8")) if caminho.exists() else {}
+    try:
+        return json.loads(caminho_estado().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def gravar_estado(estado):
     caminho = caminho_estado()
     caminho.parent.mkdir(parents=True, exist_ok=True)
     caminho.write_text(json.dumps(estado), encoding="utf-8")
+
+
+def registrar_erro(aviso, etapa, erro):
+    aviso(f"ERRO em {etapa}: {type(erro).__name__}: {erro}; a pipeline segue")
+    traceback.print_exception(erro)
 
 
 def baixar_csv_global(camada, janela):
@@ -123,6 +131,28 @@ def preencher_buraco(camada, primeiro, chave, fronteira, aviso):
     return not falhas
 
 
+def juntar_camada(bruto, camada, janela, fronteira, aviso, buraco, chave, quando):
+    df = padronizar(bruto, camada, "NRT", "csv_global")
+    antes = len(df)
+    df = df.drop_duplicates(CHAVE, ignore_index=True)
+    if df.empty:
+        aviso(f"{camada}: CSV global de {janela} veio vazio")
+        return None
+    df["country"] = fronteira.paises(df["latitude"].to_numpy(), df["longitude"].to_numpy())
+    if buraco:
+        try:
+            preencher_buraco(camada, min(df["acq_date"]), chave, fronteira, aviso)
+        except (requests.RequestException, api.ErroAPI, ValueError) as erro:
+            aviso(f"ATRASO: {camada} com buraco que a API não preencheu ({erro})")
+        except Exception as erro:
+            registrar_erro(aviso, f"buraco de {camada}", erro)
+    gravadas = mesclar(df, camada, quando)
+    ultimo = max(df["acq_date"])
+    aviso(f"{camada}: {len(df):,} focos no CSV de {janela} ({antes - len(df):,} repetidos), "
+          f"{sum(n for _, n in gravadas):,} novos em {len(gravadas)} janelas; último dia {ultimo}")
+    return ultimo
+
+
 def tempo_real(janela, fronteira, aviso, buraco=False, chave=None):
     quando = datetime.now(timezone.utc)
     ultimos = {}
@@ -132,22 +162,13 @@ def tempo_real(janela, fronteira, aviso, buraco=False, chave=None):
         except (requests.RequestException, api.ErroAPI) as erro:
             aviso(f"{camada}: CSV global de {janela} falhou ({erro})")
             continue
-        df = padronizar(bruto, camada, "NRT", "csv_global")
-        antes = len(df)
-        df = df.drop_duplicates(CHAVE, ignore_index=True)
-        if df.empty:
-            aviso(f"{camada}: CSV global de {janela} veio vazio")
+        try:
+            ultimo = juntar_camada(bruto, camada, janela, fronteira, aviso, buraco, chave, quando)
+        except Exception as erro:
+            registrar_erro(aviso, f"coleta de {camada}", erro)
             continue
-        df["country"] = fronteira.paises(df["latitude"].to_numpy(), df["longitude"].to_numpy())
-        if buraco:
-            try:
-                preencher_buraco(camada, min(df["acq_date"]), chave, fronteira, aviso)
-            except (requests.RequestException, api.ErroAPI, ValueError) as erro:
-                aviso(f"ATRASO: {camada} com buraco que a API não preencheu ({erro})")
-        gravadas = mesclar(df, camada, quando)
-        ultimos[camada] = max(df["acq_date"])
-        aviso(f"{camada}: {len(df):,} focos no CSV de {janela} ({antes - len(df):,} repetidos), "
-              f"{sum(n for _, n in gravadas):,} novos em {len(gravadas)} janelas; último dia {ultimos[camada]}")
+        if ultimo is not None:
+            ultimos[camada] = ultimo
     return ultimos
 
 
@@ -215,7 +236,10 @@ def coletar(fronteira, diario, com_sp, aviso):
     chave = api.carregar_map_key() if diario else None
     ultimos = tempo_real("7d" if diario else "48h", fronteira, aviso, buraco=diario, chave=chave)
     if diario and com_sp:
-        trocar_por_zip(fronteira, aviso, hoje)
+        try:
+            trocar_por_zip(fronteira, aviso, hoje)
+        except Exception as erro:
+            registrar_erro(aviso, "troca do SP pelo zip", erro)
         if not chave:
             aviso("sem MAP_KEY: a troca do NRT pelo SP fica para depois")
         else:
@@ -223,6 +247,8 @@ def coletar(fronteira, diario, com_sp, aviso):
                 trocar_por_sp(chave, fronteira, aviso)
             except (requests.RequestException, api.ErroAPI, ValueError) as erro:
                 aviso(f"troca do NRT pelo SP falhou ({erro}); tenta de novo amanhã")
+            except Exception as erro:
+                registrar_erro(aviso, "troca do NRT pelo SP", erro)
     for camada in atrasos(ultimos, hoje):
         aviso(f"ATRASO: {camada} com último dia {ultimos.get(camada, 'desconhecido')} no CSV global")
     return ultimos
@@ -248,19 +274,31 @@ def main(argv=None):
         fronteira = Fronteira(ler_paises())
         forcar = args.diario
         proxima = time.time()
+        erros = 0
         while True:
             if time.time() >= proxima:
                 proxima = time.time() + args.a_cada * 60
-                estado = ler_estado()
-                hoje = baixar.hoje_utc().isoformat()
-                diario = forcar or estado.get("diario") != hoje
-                coletar(fronteira, diario, not args.sem_sp, baixar.avisar)
-                if diario:
-                    gravar_estado({**estado, "diario": hoje})
+                try:
+                    estado = ler_estado()
+                    hoje = baixar.hoje_utc().isoformat()
+                    diario = forcar or estado.get("diario") != hoje
+                    coletar(fronteira, diario, not args.sem_sp, baixar.avisar)
+                    if diario:
+                        gravar_estado({**estado, "diario": hoje})
+                except (Exception, SystemExit) as erro:
+                    registrar_erro(baixar.avisar, "coleta", erro)
+                    erros += 1
                 forcar = False
-            atrasado = exportar.exportar(com_tiles=args.tiles, horas_tiles=args.horas_tiles,
-                                         minutos_pontos=args.minutos_pontos, processos=args.processos)
+            try:
+                atrasado = exportar.exportar(com_tiles=args.tiles, horas_tiles=args.horas_tiles,
+                                             minutos_pontos=args.minutos_pontos, processos=args.processos)
+            except (Exception, SystemExit) as erro:
+                registrar_erro(baixar.avisar, "exportação", erro)
+                erros += 1
+                atrasado = False
             if not args.a_cada:
+                if erros:
+                    sys.exit(1)
                 break
             if not atrasado and proxima > time.time():
                 time.sleep(proxima - time.time())
