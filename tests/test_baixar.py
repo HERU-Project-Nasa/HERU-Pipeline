@@ -47,6 +47,20 @@ def test_zip_cobre_modis_e_snpp_ate_2025():
     assert max(t.fim for t in lista if t.camada == "viirs_snpp") == date(2026, 11, 2)
 
 
+def test_ano_com_zip_sai_do_sp_e_do_nrt_da_api():
+    lista = tarefas.plano(DISP, HOJE, zips_ate={"modis": 2026, "viirs_snpp": 2026})
+    assert not [t for t in lista if t.camada in ("modis", "viirs_snpp")]
+    antes = [t for t in tarefas.plano(DISP, HOJE) if t.camada not in ("modis", "viirs_snpp")]
+    assert [t for t in lista if t.camada not in ("modis", "viirs_snpp")] == antes
+
+
+def test_ultimo_zip_vem_dos_marcadores(tmp_path):
+    assert tarefas.ultimo_zip(tmp_path) == {"modis": 2025, "viirs_snpp": 2025}
+    for nome in ("modis_2025", "modis_2026", "viirs_snpp_2024"):
+        (tmp_path / f"{nome}.ok.json").write_text("{}")
+    assert tarefas.ultimo_zip(tmp_path) == {"modis": 2026, "viirs_snpp": 2025}
+
+
 def test_ordem_traz_o_noaa20_de_2019_antes_do_noaa21():
     lista = tarefas.plano(DISP, HOJE)
     posicao = {(t.camada, t.processamento, t.inicio): i for i, t in enumerate(lista)}

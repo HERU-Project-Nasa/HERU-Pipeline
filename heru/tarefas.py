@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
-from heru.config import CAMADAS, FONTES, MAX_DIAS, PONTOS, ULTIMO_ANO_ZIP
+from heru.config import CAMADAS, FONTES, MAX_DIAS, PONTOS, ULTIMO_ANO_ZIP, ZIPS
 
 FOLGA_NRT = timedelta(hours=6)
 INICIO_K20 = date(2019, 1, 1)
@@ -51,6 +51,21 @@ def janelas(inicio, fim, passo=MAX_DIAS):
         d = ultimo + timedelta(days=1)
 
 
+def concluidos(pasta=ZIPS):
+    feitos = set()
+    for arquivo in Path(pasta).glob("*.ok.json"):
+        camada, ano = arquivo.name.removesuffix(".ok.json").rsplit("_", 1)
+        feitos.add((camada, int(ano)))
+    return feitos
+
+
+def ultimo_zip(pasta=ZIPS):
+    anos = {c: ULTIMO_ANO_ZIP for c, f in FONTES.items() if f.tem_zip}
+    for camada, ano in concluidos(pasta):
+        anos[camada] = max(anos.get(camada, ULTIMO_ANO_ZIP), ano)
+    return anos
+
+
 def datas(disp, fonte):
     linha = disp[disp["data_id"] == fonte]
     if linha.empty:
@@ -58,14 +73,16 @@ def datas(disp, fonte):
     return date.fromisoformat(linha["min_date"].iloc[0]), date.fromisoformat(linha["max_date"].iloc[0])
 
 
-def periodos(disp, camada, hoje):
+def periodos(disp, camada, hoje, zips_ate=None):
     fonte = FONTES[camada]
     saida = []
     fim_sp = None
     if fonte.sp:
         inicio_sp, fim_sp = datas(disp, fonte.sp)
         if fonte.tem_zip:
-            inicio_sp = max(inicio_sp, date(ULTIMO_ANO_ZIP + 1, 1, 1))
+            ultimo = (zips_ate or {}).get(camada, ULTIMO_ANO_ZIP)
+            inicio_sp = max(inicio_sp, date(ultimo + 1, 1, 1))
+            fim_sp = max(fim_sp, date(ultimo, 12, 31))
         saida.append(("SP", fonte.sp, inicio_sp, min(fim_sp, hoje)))
     inicio_nrt, fim_nrt = datas(disp, fonte.nrt)
     if fim_sp:
@@ -82,14 +99,14 @@ def prioridade(tarefa, corte):
     return 2
 
 
-def plano(disp, hoje, camadas=None, inicio=None, fim=None):
+def plano(disp, hoje, camadas=None, inicio=None, fim=None, zips_ate=None):
     inicio = inicio_da_janela(inicio) if inicio else None
     fim = fim_da_janela(fim) if fim else None
     tarefas = []
     cortes = []
     for nome in camadas or CAMADAS:
         fonte = FONTES[nome]
-        for processamento, codigo, ini, fi in periodos(disp, nome, hoje):
+        for processamento, codigo, ini, fi in periodos(disp, nome, hoje, zips_ate):
             if processamento == "NRT" and fonte.sp:
                 cortes.append(ini)
             ini = max(ini, inicio) if inicio else ini

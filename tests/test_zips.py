@@ -2,6 +2,7 @@ import json
 import zipfile
 
 import numpy as np
+import pandas as pd
 import pyarrow.parquet as pq
 
 from heru import zips
@@ -53,3 +54,32 @@ def test_ano_do_zip_vira_meses_sem_repetidos_e_com_concordancia(tmp_path):
     assert not caminho.exists()
     assert not list(tmp_path.glob("tmp_*"))
     assert zips.concluidos(tmp_path) == {("modis", 2024)}
+
+
+def test_snpp_para_em_2026_e_o_modis_segue():
+    lista = zips.ordem(ultimo_ano=2027)
+    assert ("modis", 2027) in lista and ("viirs_snpp", 2026) in lista
+    assert ("viirs_snpp", 2027) not in lista
+
+
+def test_ano_novo_so_depois_do_ultimo_zip(tmp_path):
+    assert zips.anos_novos(2025, tmp_path) == []
+    assert zips.anos_novos(2026, tmp_path) == [("viirs_snpp", 2026), ("modis", 2026)]
+    zips.marcador("modis", 2026, tmp_path).write_text("{}")
+    assert zips.anos_novos(2027, tmp_path) == [("viirs_snpp", 2026), ("modis", 2027)]
+
+
+def test_zip_do_ano_troca_o_sp_da_api_e_o_nrt_dos_meses_dele(tmp_path):
+    pontos = tmp_path / "pontos"
+    ano = pontos / "camada=modis/ano=2024"
+    for relativo in ("mes=08/SP_2024-08-01.parquet", "mes=08/NRT_2024-08-06.parquet", "mes=09/SP_2024-09-01.parquet",
+                     "mes=10/NRT_2024-10-01.parquet"):
+        (ano / relativo).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"x": [1]}).to_parquet(ano / relativo)
+    with zipfile.ZipFile(zips.caminho_zip("modis", 2024, tmp_path), "w") as z:
+        z.writestr("modis/2024/modis_2024_Bolivia.csv", BOLIVIA)
+    info = zips.processar("modis", 2024, FronteiraFalsa(), tmp_path, pontos)
+    assert info["trocados"] == 3
+    restantes = sorted(a.relative_to(ano).as_posix() for a in pontos.rglob("*.parquet"))
+    assert restantes == ["mes=08/SP_zip_2024-08.parquet", "mes=09/SP_zip_2024-09.parquet",
+                         "mes=10/NRT_2024-10-01.parquet"]

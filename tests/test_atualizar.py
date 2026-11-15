@@ -1,4 +1,5 @@
 import gzip
+import zipfile
 from datetime import date, datetime, timezone
 
 import numpy as np
@@ -6,7 +7,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from heru import agregar, atualizar, baixar, exportar, tarefas
+from heru import agregar, atualizar, baixar, exportar, tarefas, zips
 from heru.padronizar import ler_csv, padronizar
 from heru.publicar import Lote
 
@@ -173,3 +174,37 @@ def test_buraco_sem_map_key_so_avisa(loja, monkeypatch):
     avisos = []
     assert atualizar.preencher_buraco("viirs_noaa20", date(2026, 11, 12), None, FronteiraFalsa(), avisos.append) is False
     assert avisos[-1] == "ATRASO: viirs_noaa20 sem MAP_KEY para o buraco; rode historico --inicio 2026-11-04"
+
+
+CSV_MODIS = ("latitude,longitude,brightness,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,"
+             "bright_t31,frp,daynight,type\n-16.5,-64.0,320.1,1.0,1.0,2026-08-02,1405,Aqua,MODIS,85,6.1NRT,290.0,"
+             "30.5,D,0\n")
+
+
+def test_diaria_troca_o_sp_da_api_pelo_zip_do_ano_que_fechou(loja, monkeypatch):
+    pasta_zips = loja / "zips"
+    pasta_zips.mkdir()
+    monkeypatch.setattr(zips, "ZIPS", pasta_zips)
+    monkeypatch.setattr(zips, "TRAVA_ZIPS", loja / ".trava_zips")
+    for nome in ("modis_2025", "viirs_snpp_2025"):
+        (pasta_zips / f"{nome}.ok.json").write_text("{}")
+    baixar_zip = zips.baixar_zip
+
+    def so_o_modis(camada, ano, pasta):
+        if camada != "modis":
+            raise zips.ZipInexistente(camada)
+        return baixar_zip(camada, ano, pasta)
+
+    monkeypatch.setattr(zips, "baixar_zip", so_o_modis)
+    with zipfile.ZipFile(zips.caminho_zip("modis", 2026, pasta_zips), "w") as z:
+        z.writestr("modis/2026/modis_2026_Bolivia.csv", CSV_MODIS)
+    for inicio, processamento in ((date(2026, 8, 1), "SP"), (date(2026, 8, 6), "NRT"), (date(2026, 9, 1), "SP")):
+        destino = janela("modis", inicio, processamento)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"x": [1]}).to_parquet(destino)
+    avisos = []
+    atualizar.trocar_por_zip(FronteiraFalsa(), avisos.append, date(2027, 1, 10))
+    assert sorted(a.name for a in agregar.arquivos_do_store()) == ["SP_2026-09-01.parquet", "SP_zip_2026-08.parquet"]
+    assert tarefas.ultimo_zip(pasta_zips) == {"modis": 2026, "viirs_snpp": 2025}
+    assert "viirs_snpp 2026: zip ainda não saiu" in avisos
+    assert not (loja / ".trava_zips").exists()

@@ -164,7 +164,7 @@ def main(argv=None):
     if not chave:
         sys.exit("sem MAP_KEY: crie .env com MAP_KEY=sua_chave")
     camadas = args.camadas.split(",") if args.camadas else None
-    todas = tarefas.plano(api.disponibilidade(chave), hoje_utc(), camadas, args.inicio, args.fim)
+    todas = tarefas.plano(api.disponibilidade(chave), hoje_utc(), camadas, args.inicio, args.fim, tarefas.ultimo_zip())
     pendentes = tarefas.pendentes(todas)
     resumo(todas, pendentes)
     if args.simular or not pendentes:

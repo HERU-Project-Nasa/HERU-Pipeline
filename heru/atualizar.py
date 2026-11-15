@@ -7,7 +7,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import requests
 
-from heru import agregar, api, baixar, exportar, tarefas
+from heru import agregar, api, baixar, exportar, tarefas, zips
 from heru.config import CAMADAS, FONTES, TRAVA
 from heru.cota import Cota
 from heru.fronteira import Fronteira, ler_paises
@@ -173,7 +173,7 @@ def trocar_por_sp(chave, fronteira, aviso):
     pasta = agregar.PONTOS
     disp = api.disponibilidade(chave)
     fim_sp = ", ".join(f"{c} {tarefas.datas(disp, f.sp)[1]}" for c, f in FONTES.items() if f.sp)
-    todas = tarefas.plano(disp, baixar.hoje_utc())
+    todas = tarefas.plano(disp, baixar.hoje_utc(), zips_ate=tarefas.ultimo_zip(zips.ZIPS))
     novas = [t for t in tarefas.pendentes(todas, pasta) if t.processamento == "SP"]
     aviso(f"SP disponível até {fim_sp}; {len(novas)} janelas novas, {sum(t.custo for t in novas):,} transações")
     if novas:
@@ -187,11 +187,33 @@ def trocar_por_sp(chave, fronteira, aviso):
     aviso(f"{len(velhos)} arquivos NRT trocados pelo SP")
 
 
+def trocar_por_zip(fronteira, aviso, hoje):
+    novos = zips.anos_novos(hoje.year - 1, zips.ZIPS)
+    if not novos:
+        return
+    if zips.TRAVA_ZIPS.exists():
+        aviso("zips rodando em outra execução; a troca do SP pelo zip fica para amanhã")
+        return
+    with baixar.trava(zips.TRAVA_ZIPS):
+        for camada, ano in novos:
+            try:
+                info = zips.processar(camada, ano, fronteira, zips.ZIPS, agregar.PONTOS)
+            except zips.ZipInexistente:
+                aviso(f"{camada} {ano}: zip ainda não saiu")
+                continue
+            except (RuntimeError, ValueError) as erro:
+                aviso(f"{camada} {ano}: zip falhou ({erro}); tenta de novo amanhã")
+                continue
+            aviso(f"{camada} {ano}: zip com {info['focos']:,} focos no lugar de {info['trocados']} arquivos "
+                  "da API e do NRT")
+
+
 def coletar(fronteira, diario, com_sp, aviso):
     hoje = baixar.hoje_utc()
     chave = api.carregar_map_key() if diario else None
     ultimos = tempo_real("7d" if diario else "48h", fronteira, aviso, buraco=diario, chave=chave)
     if diario and com_sp:
+        trocar_por_zip(fronteira, aviso, hoje)
         if not chave:
             aviso("sem MAP_KEY: a troca do NRT pelo SP fica para depois")
         else:
@@ -208,7 +230,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="python -m heru atualizar")
     p.add_argument("--a-cada", type=int, default=0, help="minutos entre coletas; 0 roda uma vez")
     p.add_argument("--diario", action="store_true", help="força os CSVs de 7 dias e a troca do NRT pelo SP")
-    p.add_argument("--sem-sp", action="store_true", help="não troca o NRT pelo SP")
+    p.add_argument("--sem-sp", action="store_true", help="não troca o NRT pelo SP nem o SP pelo zip")
     p.add_argument("--tiles", action="store_true")
     p.add_argument("--horas-tiles", type=float, default=0, help="intervalo mínimo entre refações dos tiles")
     p.add_argument("--minutos-pontos", type=float, default=15, help="tempo máximo gravando points/ por exportação")
