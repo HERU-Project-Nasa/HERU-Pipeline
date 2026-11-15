@@ -69,8 +69,27 @@ Em 14/11/2026, o `historico` completo tinha 1.459 janelas e 191.080 transações
 - Na mesma rodada diária, antes de juntar o CSV de 7 dias, cada camada confere o último dia fechado do store. Se o CSV começa depois dele (a pipeline ficou parada mais de 7 dias), as janelas NRT do buraco, do início da janela do primeiro dia que falta até o primeiro dia do CSV, vêm pela Area API, como no `historico`, e o CSV entra por cima. Custa 36 transações por dia de MODIS, NOAA-20 e NOAA-21 e 4 do Landsat, cerca de 112 por dia parado. Sem `MAP_KEY` sai uma linha `ATRASO` com o `historico --inicio` a rodar à mão.
 - Camada cujo CSV falhou ou cujo último dia está mais de 1 dia atrás de hoje gera uma linha `ATRASO` no log; o resto continua publicado.
 - `recent/{camada}/24h.csv.gz`, `48h.csv.gz` e `7d.csv.gz` saem a cada exportação com os focos NRT cuja passagem (`acq_date` + `acq_time`, UTC) cai nas últimas 24 h, 48 h ou 7 dias contadas da hora da exportação, nas mesmas colunas de `points/`. Camada sem foco no período sai só com o cabeçalho.
-- `atualizar` segura `data/.trava` e `data/.trava_exportar`: pare o loop antes de rodar `historico`, `zips` ou `exportar` à mão.
+- `atualizar` segura `data/.trava` e `data/.trava_exportar`: pare o loop antes de rodar `historico`, `zips` ou `exportar` à mão. Uma trava cujo processo já morreu, ou gravada antes do último boot, é apagada sozinha na próxima execução, com uma linha `trava velha apagada` no log.
+- `--log ARQUIVO` acrescenta a saída nesse arquivo e os erros no `.err` ao lado, para rodar com `pythonw.exe`, sem console.
 - Os CSVs globais atrasam: às 05:10 UTC de 15/11/2026 o último foco do CSV de 24 h era de 14/11 às 23:39.
+
+### Início automático no Windows
+
+Enquanto não há VPS, o loop sobe no login do Windows por um atalho na pasta Inicializar do usuário (`shell:startup`), criado assim:
+
+```powershell
+$ws = New-Object -ComObject WScript.Shell
+$lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Startup")) "HERU atualizar.lnk"))
+$lnk.TargetPath = "D:\Projetos\HERU-Pipeline\.venv\Scripts\pythonw.exe"
+$lnk.Arguments = "-m heru atualizar --a-cada 60 --tiles --horas-tiles 3 --minutos-pontos 15 --processos 3 --log D:\Projetos\HERU-Pipeline\data\atualizar.log"
+$lnk.WorkingDirectory = "D:\Projetos\HERU-Pipeline"
+$lnk.WindowStyle = 7
+$lnk.Save()
+```
+
+- Depois de desligar ou reiniciar o PC, basta fazer login: o loop sobe sem janela e apaga as travas velhas. Sem login (por exemplo, parado na tela de entrada depois de uma atualização do Windows), nada roda.
+- Um erro não tratado ainda encerra o loop até o próximo login ou um início à mão (`Invoke-Item` no atalho).
+- Para parar: encerrar os dois processos `pythonw` (o PID do filho está em `data/.trava`). Para desligar o início automático, apagar o atalho.
 
 ## Amostra da Fase 0
 

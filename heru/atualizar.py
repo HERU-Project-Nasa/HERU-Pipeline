@@ -1,7 +1,9 @@
 import argparse
 import json
+import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -191,7 +193,7 @@ def trocar_por_zip(fronteira, aviso, hoje):
     novos = zips.anos_novos(hoje.year - 1, zips.ZIPS)
     if not novos:
         return
-    if zips.TRAVA_ZIPS.exists():
+    if zips.TRAVA_ZIPS.exists() and not baixar.trava_velha(zips.TRAVA_ZIPS):
         aviso("zips rodando em outra execução; a troca do SP pelo zip fica para amanhã")
         return
     with baixar.trava(zips.TRAVA_ZIPS):
@@ -235,7 +237,12 @@ def main(argv=None):
     p.add_argument("--horas-tiles", type=float, default=0, help="intervalo mínimo entre refações dos tiles")
     p.add_argument("--minutos-pontos", type=float, default=15, help="tempo máximo gravando points/ por exportação")
     p.add_argument("--processos", type=int, default=3)
+    p.add_argument("--log", type=Path, help="acrescenta a saída neste arquivo e os erros no .err ao lado")
     args = p.parse_args(argv)
+    if args.log:
+        args.log.parent.mkdir(parents=True, exist_ok=True)
+        sys.stdout = open(args.log, "a", encoding="utf-8", buffering=1)
+        sys.stderr = open(args.log.with_suffix(".err"), "a", encoding="utf-8", buffering=1)
     with baixar.trava(TRAVA), baixar.trava(exportar.TRAVA_EXPORTAR):
         baixar.manter_acordado()
         fronteira = Fronteira(ler_paises())

@@ -1,8 +1,10 @@
-from datetime import date, timedelta
+import os
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+import pytest
 
 from heru import api, baixar, tarefas
 from heru.cota import Cota
@@ -135,3 +137,38 @@ def test_janela_com_foco_fora_do_periodo_falha(tmp_path, monkeypatch):
                                     tmp_path, tmp_path / "manifest.csv")
     assert gasto == 0 and falhas == [tarefa]
     assert not tarefas.caminho_arquivo(tarefa, tmp_path).exists()
+
+
+def agora():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def test_processo_vivo_pelo_pid():
+    assert baixar.processo_vivo(os.getpid())
+    assert not baixar.processo_vivo(99_999_999)
+
+
+def test_trava_de_processo_vivo_segura_a_execucao(tmp_path):
+    caminho = tmp_path / ".trava"
+    caminho.write_text(f"{os.getpid()} {agora()}\n")
+    with pytest.raises(SystemExit):
+        with baixar.trava(caminho):
+            pass
+    assert caminho.exists()
+
+
+def test_trava_de_processo_morto_e_apagada(tmp_path, monkeypatch):
+    caminho = tmp_path / ".trava"
+    caminho.write_text(f"4242 {agora()}\n")
+    monkeypatch.setattr(baixar, "processo_vivo", lambda pid: False)
+    with baixar.trava(caminho):
+        assert caminho.read_text().split()[0] == str(os.getpid())
+    assert not caminho.exists()
+
+
+def test_trava_de_antes_do_boot_e_apagada_mesmo_com_pid_reusado(tmp_path, monkeypatch):
+    caminho = tmp_path / ".trava"
+    caminho.write_text(f"{os.getpid()} 2026-11-15T05:00:00+00:00\n")
+    monkeypatch.setattr(baixar, "ligado_desde", lambda: datetime(2026, 11, 15, 6, 0, tzinfo=timezone.utc))
+    with baixar.trava(caminho):
+        assert caminho.read_text().split()[1] != "2026-11-15T05:00:00+00:00"
