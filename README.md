@@ -1,25 +1,25 @@
 # HERU-Pipeline
 
-Focos de incêndio do FIRMS (MODIS, VIIRS S-NPP, NOAA-20, NOAA-21 e Landsat) publicados como CSV estáticos em `saida/v1/` para o frontend. O contrato dos arquivos está no manual de integração do frontend.
+FIRMS fire detections (MODIS, VIIRS S-NPP, NOAA-20, NOAA-21 and Landsat) published as static CSV files in `saida/v1/` for the frontend. The file contract is described in the frontend integration manual.
 
-## Ambiente
+## Environment
 
 ```
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-O `pyarrow` fica em 22.0.0: no Windows desta máquina o 26 teve a DLL do Parquet bloqueada pelo Controle de Aplicativo.
+`pyarrow` is pinned to 22.0.0: on this Windows machine, App Control blocked the Parquet DLL of version 26.
 
-Os polígonos de país são o ADM0 do geoBoundaries CGAZ, commit 9469f09 (CC BY 4.0), em `data/fronteira/geoBoundariesCGAZ_ADM0.geojson`:
+Country polygons are the geoBoundaries CGAZ ADM0, commit 9469f09 (CC BY 4.0), in `data/fronteira/geoBoundariesCGAZ_ADM0.geojson`:
 
 ```
 curl -L -o data/fronteira/geoBoundariesCGAZ_ADM0.geojson https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/CGAZ/geoBoundariesCGAZ_ADM0.geojson
 ```
 
-## Carga do histórico
+## Historical load
 
-A `MAP_KEY` fica em `.env` (`MAP_KEY=...`), fora do git.
+The `MAP_KEY` lives in `.env` (`MAP_KEY=...`), outside git.
 
 ```
 .venv\Scripts\python -m heru status
@@ -28,13 +28,13 @@ A `MAP_KEY` fica em `.env` (`MAP_KEY=...`), fora do git.
 .venv\Scripts\python -m heru historico
 ```
 
-- `zips`: MODIS de 2000 em diante e S-NPP de 2012 a 2026 pelos zips anuais por país, sem gastar cota, até o ano anterior ao atual; o zip de um ano novo entra sozinho quando o FIRMS publica. O S-NPP de 2019 em diante vem primeiro, porque o k20 depende dele. Cada ano vira `data/pontos/camada=X/ano=A/mes=M/SP_zip_A-M.parquet`, com o país do polígono, e `data/zips/{camada}_{ano}_paises.csv` guarda a concordância entre o país do arquivo do zip e o do polígono.
-- `historico`: o resto pela Area API (`world`; Landsat no retângulo da América do Norte), janela por janela, respeitando 4.500 transações a cada 10 min. Primeiro vem o NRT dos meses sem SP, depois o SP do mais recente ao mais antigo, com o NOAA-20 até 2019 antes do NOAA-21. Cada janela grava um Parquet com o país e uma linha em `data/manifest.csv`.
-- Os dois comandos retomam de onde pararam e podem rodar ao mesmo tempo: gravam partições diferentes e cada um tem a sua trava.
+- `zips`: MODIS from 2000 onward and S-NPP from 2012 to 2026 come from the yearly per-country zips, at no quota cost, up to the year before the current one; a new year's zip is picked up automatically when FIRMS publishes it. S-NPP from 2019 onward comes first, because k20 depends on it. Each year becomes `data/pontos/camada=X/ano=A/mes=M/SP_zip_A-M.parquet`, with the country from the polygon, and `data/zips/{camada}_{ano}_paises.csv` records how well the country of each zip file agrees with the polygon country.
+- `historico`: everything else comes from the Area API (`world`; Landsat in the North America rectangle), window by window, staying within 4,500 transactions every 10 min. First the NRT for months without SP, then SP from the most recent to the oldest, with NOAA-20 up to 2019 before NOAA-21. Each window writes a Parquet file with the country and a line in `data/manifest.csv`.
+- Both commands resume where they stopped and can run at the same time: they write different partitions and each has its own lock.
 
-Em 14/11/2026, o `historico` completo tinha 1.459 janelas e 191.080 transações (cerca de 7,1 h), com o NOAA-20 de 2019 completo depois de 130.204 transações.
+On 2026-11-14, the full `historico` had 1,459 windows and 191,080 transactions (about 7.1 h), with NOAA-20 for 2019 complete after 130,204 transactions.
 
-## Exportação
+## Export
 
 ```
 .venv\Scripts\python -m heru exportar
@@ -42,41 +42,41 @@ Em 14/11/2026, o `historico` completo tinha 1.459 janelas e 191.080 transações
 .venv\Scripts\python -m heru.conferir
 ```
 
-- `exportar` agrega cada Parquet do store uma vez, em `data/agregados/`, e só refaz o agregado de um arquivo quando ele muda. O NRT é refeito também quando a máscara de fontes estáticas (`type` 2 do SP) muda.
-- Uma camada está "operando" num dia quando algum arquivo do store cobre esse dia. O zip cobre o mês inteiro, e a janela da API vai do início até o número de dias registrado em `data/manifest.csv`. Fora disso a contagem sai vazia, e não zero, então os buracos da carga aparecem como vazios.
-- `provisional` = 1 quando algum dia do período vem do NRT de uma camada que ainda vai ter SP. O NRT do Landsat não marca, porque o Landsat não tem SP.
-- Em `meta/coverage.csv`, `first_date` é o início do último trecho contínuo que termina em `last_date`; `rows` conta todos os focos.
-- `complete_date` é o último dia UTC fechado da linha. O SP e os zips fecham todos os dias. Uma janela NRT fecha o dia D quando foi baixada depois das 06:00 UTC de D+1 (`quando_utc` em `data/manifest.csv`, ou a data do arquivo quando a janela não está lá). O dia depois de `complete_date` está pela metade e fica fora das comparações com outros anos.
-- O k (S-NPP/MODIS, 2012–2019) entra quando os zips desses anos terminam; o k20 (S-NPP/NOAA-20, 2019–2025) quando o S-NPP desses anos e todas as janelas SP do NOAA-20 estão no store. Quando os fatores mudam, toda a grade é reescrita.
-- `points/{camada}/{aaaa}/{dia}.csv.gz` traz todos os focos do dia, de qualquer `type`; as contagens usam só o `type` 0 do SP e o NRT fora da máscara. Sai um arquivo para cada dia coberto, mesmo sem foco (só o cabeçalho). O dia que tem SP vem do SP; o NRT só preenche os dias sem SP. Os pontos são refeitos quando o arquivo do store muda (`data/agregados/focos.json`), saem num lote separado depois da grade e das séries, e cada exportação grava pontos por no máximo `--minutos-pontos` minutos, com `--processos` processos. Enquanto houver atraso, o loop não espera os N minutos.
-- `meta/validation_monthly.csv` traz, mês a mês de 2020 a 2024, o S-NPP observado, o MODIS e o MODIS × k (o S-NPP reconstruído), no mundo e em cada país da `meta/validation.csv`. São os mesmos números do `median_error_2020_2024`.
-- `series/countries_yearly.csv` junta o `yearly.csv` de todos os países num arquivo só, com a coluna `iso3` na frente.
-- `meta/countries.csv` traz `area_km2` e `area_source`: a área de terra do Banco Mundial (`AG.LND.TOTL.K2`, valor mais recente) e, para os países que ele não tem (ATA, ESH, FLK, TWN, VAT e XKX), a área do polígono do CGAZ numa projeção de área igual. A tabela fica em `heru/dados/area_paises.csv` e é refeita com `.venv\Scripts\python -m heru.area`.
-- `points/` e `recent/` saem com latitude e longitude em 5 casas, menos o Landsat, que vem do FIRMS com 6 e sai com 6. Arredondado para 5, um foco perto da borda da quadrícula de 0,01° mudava de quadrícula e ficava fora ou dentro da máscara de fontes estáticas ao contrário das contagens.
-- Cada execução publica um lote só com os arquivos cujo sha256 mudou. `--tiles` refaz `grid/tiles/` (no máximo a cada `--horas-tiles` horas, ou quando os fatores mudam) e `--a-cada N` repete a exportação a cada N minutos.
+- `exportar` aggregates each Parquet file in the store once, into `data/agregados/`, and only rebuilds a file's aggregate when the file changes. NRT is also rebuilt when the static-source mask (SP `type` 2) changes.
+- A layer is "operating" on a day when some file in the store covers that day. A zip covers the whole month, and an API window runs from its start up to the number of days recorded in `data/manifest.csv`. Outside that, the count is empty rather than zero, so gaps in the load show up as empty.
+- `provisional` = 1 when any day in the period comes from the NRT of a layer that will still get SP. Landsat NRT does not set it, because Landsat has no SP.
+- In `meta/coverage.csv`, `first_date` is the start of the last continuous stretch that ends at `last_date`; `rows` counts every detection.
+- `complete_date` is the row's last closed UTC day. SP and zips close every day. An NRT window closes day D when it was downloaded after 06:00 UTC on D+1 (`quando_utc` in `data/manifest.csv`, or the file date when the window is not listed there). The day after `complete_date` is partial and is left out of comparisons with other years.
+- k (S-NPP/MODIS, 2012–2019) is applied once the zips for those years are done; k20 (S-NPP/NOAA-20, 2019–2025) once S-NPP for those years and all NOAA-20 SP windows are in the store. When the factors change, the whole grid is rewritten.
+- `points/{camada}/{aaaa}/{dia}.csv.gz` holds every detection of the day, of any `type`; the counts use only SP `type` 0 and NRT outside the mask. One file is written for each covered day, even with no detections (header only). A day that has SP comes from SP; NRT only fills days without SP. Points are rebuilt when the store file changes (`data/agregados/focos.json`), go out in a separate batch after the grid and the series, and each export writes points for at most `--minutos-pontos` minutes, with `--processos` processes. While there is a backlog, the loop does not wait the N minutes.
+- `meta/validation_monthly.csv` has, month by month from 2020 to 2024, the observed S-NPP, MODIS and MODIS × k (the reconstructed S-NPP), for the world and for each country in `meta/validation.csv`. These are the same numbers behind `median_error_2020_2024`.
+- `series/countries_yearly.csv` combines every country's `yearly.csv` into one file, with the `iso3` column first.
+- `meta/countries.csv` has `area_km2` and `area_source`: the World Bank land area (`AG.LND.TOTL.K2`, most recent value) and, for countries it does not cover (ATA, ESH, FLK, TWN, VAT and XKX), the CGAZ polygon area in an equal-area projection. The table lives in `heru/dados/area_paises.csv` and is rebuilt with `.venv\Scripts\python -m heru.area`.
+- `points/` and `recent/` carry latitude and longitude with 5 decimals, except Landsat, which comes from FIRMS with 6 and is written with 6. Rounded to 5, a detection near the edge of a 0.01° cell moved to another cell and fell inside or outside the static-source mask the opposite way from the counts.
+- Each run publishes a batch with only the files whose sha256 changed. `--tiles` rebuilds `grid/tiles/` (at most every `--horas-tiles` hours, or when the factors change) and `--a-cada N` repeats the export every N minutes.
 
-## Tempo real (Fase 4)
+## Real time (Phase 4)
 
 ```
 .venv\Scripts\python -m heru atualizar --a-cada 60 --tiles --horas-tiles 3 --minutos-pontos 15 --processos 3
 .venv\Scripts\python -m heru atualizar --diario
 ```
 
-- A cada `--a-cada` minutos, `atualizar` baixa os CSVs globais de 48 h do FIRMS (MODIS, NOAA-20, NOAA-21 e Landsat de EUA e Canadá), que não gastam cota, e roda a mesma exportação do `exportar`. O S-NPP fica de fora: parou de observar em 02/11/2026 e o CSV dele vem vazio.
-- Os focos do CSV entram na janela NRT de 5 dias do store (`NRT_{inicio}.parquet`), a mesma que a API grava. A janela é lida, recebe os focos novos sem repetir a chave lat, lon, data, hora e satélite (o foco que já existia fica com os valores do CSV) e é regravada só quando ganhou foco ou dia. Cada regravação anota uma linha em `data/manifest.csv` com `origem` = `csv_global` e `dias` até o último dia do CSV, então o `complete_date` avança sozinho.
-- Uma vez por dia UTC (e na primeira execução, ou com `--diario`) entram os CSVs de 7 dias, para fechar buracos, e a troca do NRT pelo SP: lê o `data_availability`, baixa pela Area API as janelas SP novas (cerca de 1.100 transações por camada e mês) e apaga cada arquivo NRT cujos dias o SP já cobre por inteiro. Sem `MAP_KEY`, ou com `--sem-sp`, a troca fica para depois. O estado diário fica em `data/agregados/atualizar.json`.
-- Na mesma rodada diária entra a troca do SP pelo zip. A partir de janeiro, `atualizar` procura o zip do ano que fechou (MODIS todo ano; S-NPP só até o de 2026, porque ele parou). Quando o zip sai, o ano entra como no `zips`, e cada mês que o zip traz perde os arquivos SP da API e NRT daquele mês. Daí em diante o `historico` e a troca do NRT pelo SP não pedem mais nada daquele ano pela API. As contagens do ano caem de 0,2% a 0,4%, pelos focos no mar que o zip não traz, e `source` passa de `api` para `zip` nos pontos. Enquanto o zip não sai, o log mostra `zip ainda não saiu` uma vez por dia. Se `data/.trava_zips` existe (`zips` rodando à mão), a troca fica para o dia seguinte; `--sem-sp` também desliga essa troca.
-- Na mesma rodada diária, antes de juntar o CSV de 7 dias, cada camada confere o último dia fechado do store. Se o CSV começa depois dele (a pipeline ficou parada mais de 7 dias), as janelas NRT do buraco, do início da janela do primeiro dia que falta até o primeiro dia do CSV, vêm pela Area API, como no `historico`, e o CSV entra por cima. Custa 36 transações por dia de MODIS, NOAA-20 e NOAA-21 e 4 do Landsat, cerca de 112 por dia parado. Sem `MAP_KEY` sai uma linha `ATRASO` com o `historico --inicio` a rodar à mão.
-- Camada cujo CSV falhou ou cujo último dia está mais de 1 dia atrás de hoje gera uma linha `ATRASO` no log; o resto continua publicado.
-- `recent/{camada}/24h.csv.gz`, `48h.csv.gz` e `7d.csv.gz` saem a cada exportação com os focos NRT cuja passagem (`acq_date` + `acq_time`, UTC) cai nas últimas 24 h, 48 h ou 7 dias contadas da hora da exportação, nas mesmas colunas de `points/`. Camada sem foco no período sai só com o cabeçalho.
-- `atualizar` segura `data/.trava` e `data/.trava_exportar`: pare o loop antes de rodar `historico`, `zips` ou `exportar` à mão. Uma trava cujo processo já morreu, ou gravada antes do último boot, é apagada sozinha na próxima execução, com uma linha `trava velha apagada` no log.
-- `--log ARQUIVO` acrescenta a saída nesse arquivo e os erros no `.err` ao lado, para rodar com `pythonw.exe`, sem console.
-- Um erro inesperado não derruba o loop. Falha na coleta de uma camada não impede as outras; falha na coleta inteira não impede a exportação; falha na exportação não impede a próxima rodada. Cada erro sai no log como `ERRO em {etapa}: {tipo}: {mensagem}; a pipeline segue`, com o traceback no `.err`. Se a rodada diária falhou, ela roda de novo na rodada seguinte. Os meses que uma exportação interrompida ia reescrever ficam em `meses_pendentes` (`data/agregados/estado.json`) e saem na exportação seguinte. Com `--a-cada 0`, a execução termina com código 1 quando houve erro.
-- Os CSVs globais atrasam: às 05:10 UTC de 15/11/2026 o último foco do CSV de 24 h era de 14/11 às 23:39.
+- Every `--a-cada` minutes, `atualizar` downloads the FIRMS 48 h global CSVs (MODIS, NOAA-20, NOAA-21 and Landsat for the US and Canada), which cost no quota, and runs the same export as `exportar`. S-NPP is left out: it stopped observing on 2026-11-02 and its CSV comes back empty.
+- CSV detections go into the store's 5-day NRT window (`NRT_{inicio}.parquet`), the same one the API writes. The window is read, receives the new detections without repeating the key latitude, longitude, date, time and satellite (an existing detection takes the CSV values), and is rewritten only when it gained a detection or a day. Each rewrite adds a line to `data/manifest.csv` with `origem` = `csv_global` and `dias` up to the CSV's last day, so `complete_date` moves forward on its own.
+- Once per UTC day (and on the first run, or with `--diario`), the 7-day CSVs come in to close gaps, together with the NRT-to-SP swap: it reads `data_availability`, downloads the new SP windows from the Area API (about 1,100 transactions per layer and month) and deletes each NRT file whose days SP already covers in full. Without `MAP_KEY`, or with `--sem-sp`, the swap is postponed. The daily state lives in `data/agregados/atualizar.json`.
+- The same daily round runs the SP-to-zip swap. From January on, `atualizar` looks for the zip of the year that just closed (MODIS every year; S-NPP only up to 2026, because it stopped). When the zip is out, the year is loaded as in `zips`, and each month the zip contains loses its API SP and NRT files for that month. From then on, neither `historico` nor the NRT-to-SP swap asks the API for anything from that year. The year's counts drop by 0.2% to 0.4%, because of the detections at sea that the zip does not include, and `source` changes from `api` to `zip` in the points. While the zip is not out, the log shows `zip ainda não saiu` once a day. If `data/.trava_zips` exists (`zips` running by hand), the swap moves to the next day; `--sem-sp` also turns this swap off.
+- In the same daily round, before merging the 7-day CSV, each layer checks the store's last closed day. If the CSV starts after it (the pipeline was stopped for more than 7 days), the NRT windows for the gap, from the start of the window of the first missing day up to the first day of the CSV, come from the Area API, as in `historico`, and the CSV is merged on top. It costs 36 transactions per day for MODIS, NOAA-20 and NOAA-21 and 4 for Landsat, about 112 per day of downtime. Without `MAP_KEY`, an `ATRASO` line is logged with the `historico --inicio` command to run by hand.
+- A layer whose CSV failed, or whose last day is more than 1 day behind today, produces an `ATRASO` line in the log; everything else is still published.
+- `recent/{camada}/24h.csv.gz`, `48h.csv.gz` and `7d.csv.gz` are written on every export with the NRT detections whose overpass (`acq_date` + `acq_time`, UTC) falls within the last 24 h, 48 h or 7 days counted from the export time, with the same columns as `points/`. A layer with no detections in the period is written with the header only.
+- `atualizar` holds `data/.trava` and `data/.trava_exportar`: stop the loop before running `historico`, `zips` or `exportar` by hand. A lock whose process has died, or that was written before the last boot, is removed automatically on the next run, with a `trava velha apagada` line in the log.
+- `--log FILE` appends the output to that file and the errors to the `.err` file next to it, to run with `pythonw.exe`, without a console.
+- An unexpected error does not bring the loop down. A failure collecting one layer does not stop the others; a failure in the whole collection does not stop the export; a failure in the export does not stop the next round. Each error is logged as `ERRO em {etapa}: {tipo}: {mensagem}; a pipeline segue`, with the traceback in the `.err` file. If the daily round failed, it runs again on the next round. The months an interrupted export was about to rewrite stay in `meses_pendentes` (`data/agregados/estado.json`) and go out on the next export. With `--a-cada 0`, the run exits with code 1 when there was an error.
+- The global CSVs lag: at 05:10 UTC on 2026-11-15, the last detection in the 24 h CSV was from 2026-11-14 at 23:39.
 
-### Início automático no Windows
+### Automatic start on Windows
 
-Enquanto não há VPS, o loop sobe no login do Windows por um atalho na pasta Inicializar do usuário (`shell:startup`), criado assim:
+Before the VPS, the loop started at Windows login through a shortcut in the user's Startup folder (`shell:startup`), created like this:
 
 ```powershell
 $ws = New-Object -ComObject WScript.Shell
@@ -88,18 +88,18 @@ $lnk.WindowStyle = 7
 $lnk.Save()
 ```
 
-- Depois de desligar ou reiniciar o PC, basta fazer login: o loop sobe sem janela e apaga as travas velhas. Sem login (por exemplo, parado na tela de entrada depois de uma atualização do Windows), nada roda.
-- Para parar: encerrar os dois processos `pythonw` (o PID do filho está em `data/.trava`). Para desligar o início automático, apagar o atalho.
+- After shutting down or restarting the PC, logging in is enough: the loop starts without a window and removes stale locks. Without a login (for example, stuck at the sign-in screen after a Windows update), nothing runs.
+- To stop it: end both `pythonw` processes (the child PID is in `data/.trava`). To turn off the automatic start, delete the shortcut.
 
-### VPS (Fase 5)
+### VPS (Phase 5)
 
-Na VPS (Ubuntu com Python 3.12 ou mais novo), a pipeline roda como o usuário de sistema `heru`, em `/srv/heru/HERU-Pipeline`, pelo serviço systemd `deploy/heru-atualizar.service`. Os argumentos são os do loop acima, com `--a-cada 10` e sem `--log`: a saída e os tracebacks vão para o journal.
+On the VPS (Ubuntu with Python 3.12 or newer), the pipeline runs as the `heru` system user, in `/srv/heru/HERU-Pipeline`, through the systemd service `deploy/heru-atualizar.service`. The arguments are the same as the loop above, with `--a-cada 10` and without `--log`: output and tracebacks go to the journal.
 
-- A coleta sai a cada 10 minutos, contados do início da anterior, e a exportação vem logo depois, no mesmo ciclo. Os CSVs globais não gastam transações da `MAP_KEY`. O limite de 5.000 transações a cada 10 minutos vale só para a Area API, que entra na rodada diária e no preenchimento de buraco, e o `cota` já espaça essas chamadas dentro da janela.
-- Na VPS (2 vCPU), um ciclo comum leva menos de 1 minuto: em 15/11/2026, coleta às 17:38:32 UTC e lote publicado às 17:39:18. O ciclo que refaz os tiles (no máximo a cada 3 horas) leva alguns minutos a mais. Se um ciclo passar de 10 minutos, a coleta seguinte começa assim que ele termina.
-- Depois de copiar o `data/` de outra máquina, o primeiro ciclo recalcula todos os agregados e regrava `points/` inteiro, porque a cópia muda o `st_mtime_ns` dos arquivos. Na VPS isso levou cerca de 37 minutos, em três lotes, com pico de 5,7 GB de RAM.
+- Collection runs every 10 minutes, counted from the start of the previous one, and the export follows right after, in the same cycle. The global CSVs do not spend `MAP_KEY` transactions. The limit of 5,000 transactions every 10 minutes applies only to the Area API, which is used in the daily round and for gap filling, and `cota` already spaces those calls within the window.
+- On the VPS (2 vCPU), a normal cycle takes less than 1 minute: on 2026-11-15, collection at 17:38:32 UTC and batch published at 17:39:18. The cycle that rebuilds the tiles (at most every 3 hours) takes a few minutes longer. If a cycle goes past 10 minutes, the next collection starts as soon as it ends.
+- After copying `data/` from another machine, the first cycle recomputes every aggregate and rewrites all of `points/`, because the copy changes the files' `st_mtime_ns`. On the VPS this took about 37 minutes, in three batches, with a peak of 5.7 GB of RAM.
 
-Instalação, uma vez, como root:
+One-time installation, as root:
 
 ```
 apt install -y git python3-venv
@@ -114,38 +114,38 @@ fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /
 echo "/swapfile none swap sw 0 0" >> /etc/fstab
 ```
 
-Depois vêm o `.env` (dono `heru`, `chmod 600`) e o `data/` e o `saida/` do loop anterior, copiados com esse loop parado. Só então o serviço é ligado, com `systemctl enable --now heru-atualizar`. Ligado sem o `data/`, o `atualizar` começa o store do zero.
+Next come `.env` (owned by `heru`, `chmod 600`) and the `data/` and `saida/` folders from the previous loop, copied while that loop is stopped. Only then is the service turned on, with `systemctl enable --now heru-atualizar`. If it starts without `data/`, `atualizar` builds the store from scratch.
 
-- Atualizar o código depois de um merge na `main`: `ssh root@IP_DA_VPS /srv/heru/HERU-Pipeline/deploy/deploy.sh`. O script faz `git pull`, instala as dependências, roda os testes, reinstala o arquivo do serviço e reinicia o serviço se ele estiver rodando. Com um teste falhando, o script para antes de reiniciar.
-- Log: `journalctl -u heru-atualizar -f`. Só os avisos: `journalctl -u heru-atualizar -g "ERRO|ATRASO"`.
-- Parar: `systemctl stop heru-atualizar`. O systemd manda SIGINT e o `atualizar` solta as travas antes de sair. Depois de uma queda, o serviço volta sozinho em 60 s; depois de um boot, sobe sem login.
-- O swap de 4 GB segura picos da exportação com 3 processos numa VPS de 8 GB de RAM.
+- To update the code after a merge into `main`: `ssh root@VPS_IP /srv/heru/HERU-Pipeline/deploy/deploy.sh`. The script runs `git pull`, installs the dependencies, runs the tests, reinstalls the service file and restarts the service if it is running. If a test fails, the script stops before restarting.
+- Log: `journalctl -u heru-atualizar -f`. Warnings only: `journalctl -u heru-atualizar -g "ERRO|ATRASO"`.
+- To stop: `systemctl stop heru-atualizar`. systemd sends SIGINT and `atualizar` releases the locks before exiting. After a crash, the service comes back on its own in 60 s; after a boot, it starts without a login.
+- The 4 GB swap absorbs export peaks with 3 processes on an 8 GB RAM VPS.
 
-## Amostra da Fase 0
+## Phase 0 sample
 
 ```
 .venv\Scripts\python -m heru.amostra --store D:\Projetos\firms-mundo\data\pontos
 ```
 
-Lê o store Parquet do piloto `firms-mundo` e publica um lote em `saida/v1/`: `meta/*`, séries globais e de todos os países, a grade mensal de 2026 e os pontos de 15/08/2026.
+Reads the Parquet store of the `firms-mundo` pilot and publishes a batch in `saida/v1/`: `meta/*`, global and per-country series, the 2026 monthly grid and the points for 2026-08-15.
 
-O que a amostra ainda não tem:
+What the sample still lacks:
 
-- S-NPP: o store do piloto não tem essa camada, então `viirs_snpp` fica vazio e a camada não aparece em `meta/coverage.csv`.
-- NOAA-20, NOAA-21 e Landsat só a partir de 01/08/2026.
-- `harmonized` vazio e `meta/validation.csv` só com o cabeçalho, porque o k depende do S-NPP.
-- `meta/static_sources.csv` vem do `type` 2 do MODIS SP.
-- Sem `recent/` e sem `grid/tiles/`.
+- S-NPP: the pilot store does not have this layer, so `viirs_snpp` is empty and the layer does not appear in `meta/coverage.csv`.
+- NOAA-20, NOAA-21 and Landsat only from 2026-08-01.
+- `harmonized` is empty and `meta/validation.csv` has only the header, because k depends on S-NPP.
+- `meta/static_sources.csv` comes from MODIS SP `type` 2.
+- No `recent/` and no `grid/tiles/`.
 
-## Testes
+## Tests
 
 ```
 .venv\Scripts\python -m pytest -q
 ```
 
-## Histórico do contrato
+## Contract history
 
-- 14/11/2026: amostra da Fase 0 publicada.
-- 15/11/2026: Fase 4 no ar: `recent/` e lotes de hora em hora com os CSVs globais do FIRMS.
-- 15/11/2026: `meta/validation_monthly.csv`, `series/countries_yearly.csv`, área dos países em `meta/countries.csv` e Landsat com 6 casas em `points/` e `recent/`.
-- 15/11/2026: troca do SP da API pelo zip anual quando o FIRMS publica o zip do ano (a primeira será a de 2026, em 2027).
+- 2026-11-14: Phase 0 sample published.
+- 2026-11-15: Phase 4 live: `recent/` and hourly batches from the FIRMS global CSVs.
+- 2026-11-15: `meta/validation_monthly.csv`, `series/countries_yearly.csv`, country areas in `meta/countries.csv` and Landsat with 6 decimals in `points/` and `recent/`.
+- 2026-11-15: API SP replaced by the yearly zip once FIRMS publishes the year's zip (the first will be 2026, in 2027).
