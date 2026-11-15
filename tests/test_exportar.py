@@ -122,6 +122,17 @@ def test_k_por_bloco_e_harmonizada_por_regime(ambiente, monkeypatch):
     assert conferir(saida) == []
 
 
+def test_landsat_sai_com_as_6_casas_do_firms():
+    df = pd.DataFrame({"latitude": [39.289997], "longitude": [-76.600776], "acq_date": pd.to_datetime(["2026-10-18"]),
+                       "acq_time": [1546], "satelite": "L9", "country": "USA", "daynight": "D", "conf_class": "nominal",
+                       "conf_raw": "n", "frp": np.nan, "brilho": np.nan, "scan": 1.0, "track": 1.0, "type": pd.NA,
+                       "processamento": "NRT", "origem": "api"})
+    landsat = focos.formatar_pontos(df.assign(camada="landsat"), focos.casas("landsat"))
+    modis = focos.formatar_pontos(df.assign(camada="modis"), focos.casas("modis"))
+    assert landsat[["latitude", "longitude"]].iloc[0].tolist() == ["39.289997", "-76.600776"]
+    assert modis[["latitude", "longitude"]].iloc[0].tolist() == ["39.29000", "-76.60078"]
+
+
 def test_segunda_exportacao_sem_mudanca_nao_gera_lote(ambiente):
     exportar.exportar(ambiente / "saida", aviso=lambda _: None, processos=1)
     assert pd.read_csv(ambiente / "saida/meta/latest.csv")["batch"].tolist() == [2]

@@ -271,7 +271,8 @@ def recentes(arquivos, lote, agora):
         df = df.assign(acq_date=pd.to_datetime(df["acq_date"]), camada=camada)
         for nome, janela in RECENTES.items():
             parte = df[df["acq_datetime_utc"] >= agora - janela]
-            lote.publicar(f"recent/{camada}/{nome}.csv.gz", focos.formatar_pontos(parte), "recent", nome)
+            lote.publicar(f"recent/{camada}/{nome}.csv.gz", focos.formatar_pontos(parte, focos.casas(camada)),
+                          "recent", nome)
 
 
 def gravado_em(arquivos):
