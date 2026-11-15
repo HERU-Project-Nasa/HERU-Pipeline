@@ -17,14 +17,19 @@ from heru.publicar import Lote, agora, gravar_bytes, ler_anteriores, ultimo_lote
 ESTADO_FOCOS = agregar.AGREGADOS / "focos.json"
 COLUNAS_LIDAS = ["satelite", "processamento", "origem", "latitude", "longitude", "acq_date", "acq_time", "daynight",
                  "conf_raw", "conf_class", "frp", "brilho", "scan", "track", "type", "country"]
+CASAS_COORDENADAS = {"landsat": 6}
 
 
-def formatar_pontos(df):
-    df = df.assign(latitude=df["latitude"].round(5), longitude=df["longitude"].round(5))
+def casas(camada):
+    return CASAS_COORDENADAS.get(camada, 5)
+
+
+def formatar_pontos(df, casas_decimais=5):
+    df = df.assign(latitude=df["latitude"].round(casas_decimais), longitude=df["longitude"].round(casas_decimais))
     df = df.sort_values(["acq_date", "acq_time", "latitude", "longitude"], ignore_index=True)
     saida = pd.DataFrame({
-        "latitude": [f"{v:.5f}" for v in df["latitude"]],
-        "longitude": [f"{v:.5f}" for v in df["longitude"]],
+        "latitude": [f"{v:.{casas_decimais}f}" for v in df["latitude"]],
+        "longitude": [f"{v:.{casas_decimais}f}" for v in df["longitude"]],
         "acq_date": df["acq_date"].dt.strftime("%Y-%m-%d"),
         "acq_time": df["acq_time"].astype(str).str.zfill(4),
         "layer": df["camada"],
@@ -49,7 +54,7 @@ def corpo_do_dia(tabela, camada, dia):
     df = parte.to_pandas(date_as_object=False)
     df["acq_date"] = df["acq_date"].astype("datetime64[ns]")
     df["camada"] = camada
-    texto = formatar_pontos(df).to_csv(index=False, lineterminator="\n", na_rep="").encode("utf-8")
+    texto = formatar_pontos(df, casas(camada)).to_csv(index=False, lineterminator="\n", na_rep="").encode("utf-8")
     return gzip.compress(texto, compresslevel=6, mtime=0), len(df)
 
 

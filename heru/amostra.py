@@ -8,7 +8,7 @@ import pyarrow.parquet as pq
 
 from heru import agregar, contar
 from heru.config import CAMADAS, CELULA, COLUNAS_VALIDACAO, INFO_CAMADAS, SAIDA
-from heru.focos import formatar_pontos
+from heru.focos import casas, formatar_pontos
 from heru.fronteira import Fronteira, chave_fina, ler_paises, tabela_paises
 from heru.publicar import Lote, agora
 
@@ -156,7 +156,7 @@ def publicar_pontos(lote, dados, dia, operando):
         if not operando.loc[dia, camada]:
             continue
         df = dados["pontos"][dados["pontos"]["camada"] == camada]
-        lote.publicar(f"points/{camada}/{texto[:4]}/{texto}.csv.gz", formatar_pontos(df), "points", texto)
+        lote.publicar(f"points/{camada}/{texto[:4]}/{texto}.csv.gz", formatar_pontos(df, casas(camada)), "points", texto)
 
 
 def main(argv=None):

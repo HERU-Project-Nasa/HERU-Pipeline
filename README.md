@@ -49,6 +49,10 @@ Em 14/11/2026, o `historico` completo tinha 1.459 janelas e 191.080 transações
 - `complete_date` é o último dia UTC fechado da linha. O SP e os zips fecham todos os dias. Uma janela NRT fecha o dia D quando foi baixada depois das 06:00 UTC de D+1 (`quando_utc` em `data/manifest.csv`, ou a data do arquivo quando a janela não está lá). O dia depois de `complete_date` está pela metade e fica fora das comparações com outros anos.
 - O k (S-NPP/MODIS, 2012–2019) entra quando os zips desses anos terminam; o k20 (S-NPP/NOAA-20, 2019–2025) quando o S-NPP desses anos e todas as janelas SP do NOAA-20 estão no store. Quando os fatores mudam, toda a grade é reescrita.
 - `points/{camada}/{aaaa}/{dia}.csv.gz` traz todos os focos do dia, de qualquer `type`; as contagens usam só o `type` 0 do SP e o NRT fora da máscara. Sai um arquivo para cada dia coberto, mesmo sem foco (só o cabeçalho). O dia que tem SP vem do SP; o NRT só preenche os dias sem SP. Os pontos são refeitos quando o arquivo do store muda (`data/agregados/focos.json`), saem num lote separado depois da grade e das séries, e cada exportação grava pontos por no máximo `--minutos-pontos` minutos, com `--processos` processos. Enquanto houver atraso, o loop não espera os N minutos.
+- `meta/validation_monthly.csv` traz, mês a mês de 2020 a 2024, o S-NPP observado, o MODIS e o MODIS × k (o S-NPP reconstruído), no mundo e em cada país da `meta/validation.csv`. São os mesmos números do `median_error_2020_2024`.
+- `series/countries_yearly.csv` junta o `yearly.csv` de todos os países num arquivo só, com a coluna `iso3` na frente.
+- `meta/countries.csv` traz `area_km2` e `area_source`: a área de terra do Banco Mundial (`AG.LND.TOTL.K2`, valor mais recente) e, para os países que ele não tem (ATA, ESH, FLK, TWN, VAT e XKX), a área do polígono do CGAZ numa projeção de área igual. A tabela fica em `heru/dados/area_paises.csv` e é refeita com `.venv\Scripts\python -m heru.area`.
+- `points/` e `recent/` saem com latitude e longitude em 5 casas, menos o Landsat, que vem do FIRMS com 6 e sai com 6. Arredondado para 5, um foco perto da borda da quadrícula de 0,01° mudava de quadrícula e ficava fora ou dentro da máscara de fontes estáticas ao contrário das contagens.
 - Cada execução publica um lote só com os arquivos cujo sha256 mudou. `--tiles` refaz `grid/tiles/` (no máximo a cada `--horas-tiles` horas, ou quando os fatores mudam) e `--a-cada N` repete a exportação a cada N minutos.
 
 ## Tempo real (Fase 4)
@@ -93,3 +97,4 @@ O que a amostra ainda não tem:
 
 - 14/11/2026: amostra da Fase 0 publicada.
 - 15/11/2026: Fase 4 no ar: `recent/` e lotes de hora em hora com os CSVs globais do FIRMS.
+- 15/11/2026: `meta/validation_monthly.csv`, `series/countries_yearly.csv`, área dos países em `meta/countries.csv` e Landsat com 6 casas em `points/` e `recent/`.

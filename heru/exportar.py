@@ -9,6 +9,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from heru import agregar, focos, harmonizar
+from heru.area import ler_areas
 from heru.baixar import avisar, manter_acordado, trava
 from heru.config import CAMADAS, CELULA, COLUNAS_CONTAGEM, COM_PASSAGEM, DATA, FONTES, INFO_CAMADAS, SAIDA
 from heru.fronteira import ler_paises, tabela_paises
@@ -271,7 +272,8 @@ def recentes(arquivos, lote, agora):
         df = df.assign(acq_date=pd.to_datetime(df["acq_date"]), camada=camada)
         for nome, janela in RECENTES.items():
             parte = df[df["acq_datetime_utc"] >= agora - janela]
-            lote.publicar(f"recent/{camada}/{nome}.csv.gz", focos.formatar_pontos(parte), "recent", nome)
+            lote.publicar(f"recent/{camada}/{nome}.csv.gz", focos.formatar_pontos(parte, focos.casas(camada)),
+                          "recent", nome)
 
 
 def gravado_em(arquivos):
@@ -286,7 +288,7 @@ def texto_data(serie):
     return pd.to_datetime(serie).dt.strftime("%Y-%m-%d").fillna("")
 
 
-def meta(lote, cobertura, paises_resumo, tabela, validacao, mascara, gravacoes):
+def meta(lote, cobertura, paises_resumo, tabela, validacao, validacao_mensal, mascara, gravacoes):
     cob = cobertura.assign(updated_at=[gravacoes.get((int(c), p), "") for c, p in zip(cobertura["layer"], cobertura["processing"])])
     cob = cob.assign(layer=cob["layer"].map(lambda c: CAMADAS[int(c)])).sort_values(["layer", "processing"], ignore_index=True)
     lote.publicar("meta/coverage.csv", cob.assign(first_date=texto_data(cob["first_date"]),
@@ -294,13 +296,16 @@ def meta(lote, cobertura, paises_resumo, tabela, validacao, mascara, gravacoes):
                                                   complete_date=texto_data(cob["complete_date"]))[
         ["layer", "processing", "first_date", "last_date", "rows", "updated_at", "complete_date"]], "meta")
     paises = tabela.merge(paises_resumo.rename(columns={"country": "iso3"}), on="iso3", how="left")
+    paises = paises.merge(ler_areas(), on="iso3", how="left").fillna({"area_km2": "", "area_source": ""})
     paises["rows"] = paises["rows"].fillna(0).astype(int)
     paises["first_date"] = texto_data(paises["first_date"])
     paises["last_date"] = texto_data(paises["last_date"])
-    lote.publicar("meta/countries.csv", paises[["iso3", "name", "continent", "first_date", "last_date", "rows"]], "meta")
+    lote.publicar("meta/countries.csv", paises[["iso3", "name", "continent", "first_date", "last_date", "rows", "area_km2",
+                                                "area_source"]], "meta")
     lote.publicar("meta/layers.csv", pd.DataFrame(INFO_CAMADAS, columns=["layer", "title", "instrument", "resolution_m",
                                                                          "satellites", "notes"]), "meta")
     lote.publicar("meta/validation.csv", validacao, "meta")
+    lote.publicar("meta/validation_monthly.csv", validacao_mensal, "meta")
     estaticas = pd.DataFrame({"lat": [f"{v:.2f}" for v in (mascara // 40000 - 9000) / 100],
                               "lon": [f"{v:.2f}" for v in (mascara % 40000 - 18000) / 100]})
     lote.publicar("meta/static_sources.csv", estaticas, "meta")
@@ -359,13 +364,18 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
     tabela = tabela_paises(paises)
     dia_pais = dict(tuple(dia.groupby("country")))
     contrib_pais = dict(tuple(contrib.groupby("country"))) if len(contrib) else {}
+    anuais = []
     for iso3 in tabela["iso3"]:
         corpos = series(dia_pais.get(iso3, dia.iloc[0:0]), contrib_pais.get(iso3, contrib.iloc[0:0]), ctx)
         for nome, corpo in corpos.items():
             lote.publicar(f"series/countries/{iso3}/{nome}.csv", corpo, "series")
+        anuais.append(corpos["yearly"].assign(iso3=iso3))
+    lote.publicar("series/countries_yearly.csv", pd.concat(anuais, ignore_index=True)[["iso3", "year"] + COLUNAS_CONTAGEM],
+                  "series")
     recentes(arquivos, lote, pd.Timestamp.now(tz="UTC"))
-    validacao = harmonizar.validacao(blocos, dia, mes_pb, fatores, ZIPS)
-    meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, mascara, gravado_em(arquivos))
+    validacao, validacao_mensal = harmonizar.validacao(blocos, dia, mes_pb, fatores, ZIPS)
+    meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, validacao_mensal, mascara,
+         gravado_em(arquivos))
     publicou = lote.fechar()
     ESTADO.write_text(json.dumps({"fatores": assinatura, "lote": lote.numero if publicou else estado.get("lote"),
                                      "meses": marcas, "tiles": ultimo_tiles, "tiles_pendentes": tiles_pendentes}),

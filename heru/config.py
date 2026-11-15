@@ -70,3 +70,5 @@ COLUNAS_VALIDACAO = [
     "country_agreement", "k_d", "k_n", "calib_years", "modis_calib_hotspots",
     "k20_d", "k20_n", "calib_years_k20", "noaa20_calib_hotspots",
 ]
+
+COLUNAS_VALIDACAO_MENSAL = ["scope", "id", "month", "viirs_snpp", "modis", "modis_x_k"]
