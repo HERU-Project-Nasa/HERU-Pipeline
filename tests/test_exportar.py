@@ -121,6 +121,9 @@ def test_k_por_bloco_e_harmonizada_por_regime(ambiente, monkeypatch):
     assert tile["month"].tolist() == sorted(tile["month"])
     validacao_mensal = pd.read_csv(saida / "meta/validation_monthly.csv", keep_default_na=False)
     assert validacao_mensal.groupby("id").size().to_dict() == {"BOL": 60, "world": 60}
+    todos = pd.read_csv(saida / "series/countries_yearly.csv", keep_default_na=False, dtype={"year": str})
+    assert todos["iso3"].unique().tolist() == ["BOL", "PRT"]
+    assert todos[todos["iso3"] == "BOL"].drop(columns="iso3").set_index("year").equals(anual)
     assert conferir(saida) == []
 
 

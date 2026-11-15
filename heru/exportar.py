@@ -361,10 +361,14 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
     tabela = tabela_paises(paises)
     dia_pais = dict(tuple(dia.groupby("country")))
     contrib_pais = dict(tuple(contrib.groupby("country"))) if len(contrib) else {}
+    anuais = []
     for iso3 in tabela["iso3"]:
         corpos = series(dia_pais.get(iso3, dia.iloc[0:0]), contrib_pais.get(iso3, contrib.iloc[0:0]), ctx)
         for nome, corpo in corpos.items():
             lote.publicar(f"series/countries/{iso3}/{nome}.csv", corpo, "series")
+        anuais.append(corpos["yearly"].assign(iso3=iso3))
+    lote.publicar("series/countries_yearly.csv", pd.concat(anuais, ignore_index=True)[["iso3", "year"] + COLUNAS_CONTAGEM],
+                  "series")
     recentes(arquivos, lote, pd.Timestamp.now(tz="UTC"))
     validacao, validacao_mensal = harmonizar.validacao(blocos, dia, mes_pb, fatores, ZIPS)
     meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, validacao_mensal, mascara,

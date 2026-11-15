@@ -17,6 +17,7 @@ CABECALHOS = {
     "meta/layers.csv": ["layer", "title", "instrument", "resolution_m", "satellites", "notes"],
     "meta/validation.csv": COLUNAS_VALIDACAO,
     "meta/validation_monthly.csv": COLUNAS_VALIDACAO_MENSAL,
+    "series/countries_yearly.csv": ["iso3", "year"] + COLUNAS_CONTAGEM,
     "meta/static_sources.csv": ["lat", "lon"],
 }
 PROIBIDOS = {"nan", "NaN", "null", "NA", "None", "<NA>"}
