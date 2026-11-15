@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from heru import agregar, focos, harmonizar
 from heru.baixar import avisar, manter_acordado, trava
@@ -21,6 +22,7 @@ INICIO_K = 2002 * 12 + 6
 INICIO_SNPP = 2012 * 12
 INICIO_K20 = 2026 * 12 + 10
 ESCALAS = [("daily", "date", "%Y-%m-%d"), ("monthly", "month", "%Y-%m"), ("yearly", "year", "%Y")]
+RECENTES = {"24h": pd.Timedelta(hours=24), "48h": pd.Timedelta(hours=48), "7d": pd.Timedelta(days=7)}
 
 
 def regime(mes):
@@ -256,6 +258,22 @@ def tiles(arquivos, meses, fatores, operando_mensal, lote, aviso):
     aviso(f"tiles: {len(linhas)} blocos")
 
 
+def recentes(arquivos, lote, agora):
+    corte = agora - max(RECENTES.values())
+    primeiro_mes = corte.year * 12 + corte.month - 1
+    colunas = focos.COLUNAS_LIDAS + ["acq_datetime_utc"]
+    for indice, camada in enumerate(CAMADAS):
+        do_periodo = [a for a in arquivos if not agregar.eh_sp(a) and agregar.camada_do_arquivo(a) == indice
+                      and agregar.mes_do_arquivo(a) >= primeiro_mes]
+        partes = [pq.ParquetFile(a).read(columns=colunas).to_pandas(date_as_object=False) for a in do_periodo]
+        partes = [p[p["acq_datetime_utc"] >= corte] for p in partes]
+        df = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame(columns=colunas)
+        df = df.assign(acq_date=pd.to_datetime(df["acq_date"]), camada=camada)
+        for nome, janela in RECENTES.items():
+            parte = df[df["acq_datetime_utc"] >= agora - janela]
+            lote.publicar(f"recent/{camada}/{nome}.csv.gz", focos.formatar_pontos(parte), "recent", nome)
+
+
 def gravado_em(arquivos):
     mais_recente = {}
     for arquivo in arquivos:
@@ -345,6 +363,7 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
         corpos = series(dia_pais.get(iso3, dia.iloc[0:0]), contrib_pais.get(iso3, contrib.iloc[0:0]), ctx)
         for nome, corpo in corpos.items():
             lote.publicar(f"series/countries/{iso3}/{nome}.csv", corpo, "series")
+    recentes(arquivos, lote, pd.Timestamp.now(tz="UTC"))
     validacao = harmonizar.validacao(blocos, dia, mes_pb, fatores, ZIPS)
     meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, mascara, gravado_em(arquivos))
     publicou = lote.fechar()
