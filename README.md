@@ -91,6 +91,32 @@ $lnk.Save()
 - Depois de desligar ou reiniciar o PC, basta fazer login: o loop sobe sem janela e apaga as travas velhas. Sem login (por exemplo, parado na tela de entrada depois de uma atualização do Windows), nada roda.
 - Para parar: encerrar os dois processos `pythonw` (o PID do filho está em `data/.trava`). Para desligar o início automático, apagar o atalho.
 
+### VPS (Fase 5)
+
+Na VPS (Ubuntu com Python 3.12 ou mais novo), a pipeline roda como o usuário de sistema `heru`, em `/srv/heru/HERU-Pipeline`, pelo serviço systemd `deploy/heru-atualizar.service`. Os argumentos são os do loop acima, sem `--log`: a saída e os tracebacks vão para o journal.
+
+Instalação, uma vez, como root:
+
+```
+apt install -y git python3-venv
+useradd --system --create-home --home-dir /srv/heru --shell /bin/bash heru
+sudo -u heru git clone https://github.com/HERU-Project-Nasa/HERU-Pipeline.git /srv/heru/HERU-Pipeline
+cd /srv/heru/HERU-Pipeline
+sudo -u heru python3 -m venv .venv
+sudo -u heru .venv/bin/pip install -r requirements.txt
+install -m 644 deploy/heru-atualizar.service /etc/systemd/system/
+systemctl daemon-reload
+fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo "/swapfile none swap sw 0 0" >> /etc/fstab
+```
+
+Depois vêm o `.env` (dono `heru`, `chmod 600`) e o `data/` e o `saida/` do loop anterior, copiados com esse loop parado. Só então o serviço é ligado, com `systemctl enable --now heru-atualizar`. Ligado sem o `data/`, o `atualizar` começa o store do zero.
+
+- Atualizar o código depois de um merge na `main`: `ssh root@IP_DA_VPS /srv/heru/HERU-Pipeline/deploy/deploy.sh`. O script faz `git pull`, instala as dependências, roda os testes, reinstala o arquivo do serviço e reinicia o serviço se ele estiver rodando. Com um teste falhando, o script para antes de reiniciar.
+- Log: `journalctl -u heru-atualizar -f`. Só os avisos: `journalctl -u heru-atualizar -g "ERRO|ATRASO"`.
+- Parar: `systemctl stop heru-atualizar`. O systemd manda SIGINT e o `atualizar` solta as travas antes de sair. Depois de uma queda, o serviço volta sozinho em 60 s; depois de um boot, sobe sem login.
+- O swap de 4 GB segura picos da exportação com 3 processos numa VPS de 8 GB de RAM.
+
 ## Amostra da Fase 0
 
 ```
