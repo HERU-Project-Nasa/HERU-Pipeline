@@ -93,7 +93,11 @@ $lnk.Save()
 
 ### VPS (Fase 5)
 
-Na VPS (Ubuntu com Python 3.12 ou mais novo), a pipeline roda como o usuário de sistema `heru`, em `/srv/heru/HERU-Pipeline`, pelo serviço systemd `deploy/heru-atualizar.service`. Os argumentos são os do loop acima, sem `--log`: a saída e os tracebacks vão para o journal.
+Na VPS (Ubuntu com Python 3.12 ou mais novo), a pipeline roda como o usuário de sistema `heru`, em `/srv/heru/HERU-Pipeline`, pelo serviço systemd `deploy/heru-atualizar.service`. Os argumentos são os do loop acima, com `--a-cada 10` e sem `--log`: a saída e os tracebacks vão para o journal.
+
+- A coleta sai a cada 10 minutos, contados do início da anterior, e a exportação vem logo depois, no mesmo ciclo. Os CSVs globais não gastam transações da `MAP_KEY`. O limite de 5.000 transações a cada 10 minutos vale só para a Area API, que entra na rodada diária e no preenchimento de buraco, e o `cota` já espaça essas chamadas dentro da janela.
+- Na VPS (2 vCPU), um ciclo comum leva menos de 1 minuto: em 15/11/2026, coleta às 17:38:32 UTC e lote publicado às 17:39:18. O ciclo que refaz os tiles (no máximo a cada 3 horas) leva alguns minutos a mais. Se um ciclo passar de 10 minutos, a coleta seguinte começa assim que ele termina.
+- Depois de copiar o `data/` de outra máquina, o primeiro ciclo recalcula todos os agregados e regrava `points/` inteiro, porque a cópia muda o `st_mtime_ns` dos arquivos. Na VPS isso levou cerca de 37 minutos, em três lotes, com pico de 5,7 GB de RAM.
 
 Instalação, uma vez, como root:
 
