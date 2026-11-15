@@ -287,7 +287,7 @@ def texto_data(serie):
     return pd.to_datetime(serie).dt.strftime("%Y-%m-%d").fillna("")
 
 
-def meta(lote, cobertura, paises_resumo, tabela, validacao, mascara, gravacoes):
+def meta(lote, cobertura, paises_resumo, tabela, validacao, validacao_mensal, mascara, gravacoes):
     cob = cobertura.assign(updated_at=[gravacoes.get((int(c), p), "") for c, p in zip(cobertura["layer"], cobertura["processing"])])
     cob = cob.assign(layer=cob["layer"].map(lambda c: CAMADAS[int(c)])).sort_values(["layer", "processing"], ignore_index=True)
     lote.publicar("meta/coverage.csv", cob.assign(first_date=texto_data(cob["first_date"]),
@@ -302,6 +302,7 @@ def meta(lote, cobertura, paises_resumo, tabela, validacao, mascara, gravacoes):
     lote.publicar("meta/layers.csv", pd.DataFrame(INFO_CAMADAS, columns=["layer", "title", "instrument", "resolution_m",
                                                                          "satellites", "notes"]), "meta")
     lote.publicar("meta/validation.csv", validacao, "meta")
+    lote.publicar("meta/validation_monthly.csv", validacao_mensal, "meta")
     estaticas = pd.DataFrame({"lat": [f"{v:.2f}" for v in (mascara // 40000 - 9000) / 100],
                               "lon": [f"{v:.2f}" for v in (mascara % 40000 - 18000) / 100]})
     lote.publicar("meta/static_sources.csv", estaticas, "meta")
@@ -365,8 +366,9 @@ def exportar(saida=SAIDA, com_tiles=False, aviso=avisar, horas_tiles=0, minutos_
         for nome, corpo in corpos.items():
             lote.publicar(f"series/countries/{iso3}/{nome}.csv", corpo, "series")
     recentes(arquivos, lote, pd.Timestamp.now(tz="UTC"))
-    validacao = harmonizar.validacao(blocos, dia, mes_pb, fatores, ZIPS)
-    meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, mascara, gravado_em(arquivos))
+    validacao, validacao_mensal = harmonizar.validacao(blocos, dia, mes_pb, fatores, ZIPS)
+    meta(lote, cobertura, agregar.resumir(arquivos, "paises", ["country"]), tabela, validacao, validacao_mensal, mascara,
+         gravado_em(arquivos))
     publicou = lote.fechar()
     ESTADO.write_text(json.dumps({"fatores": assinatura, "lote": lote.numero if publicou else estado.get("lote"),
                                      "meses": marcas, "tiles": ultimo_tiles, "tiles_pendentes": tiles_pendentes}),

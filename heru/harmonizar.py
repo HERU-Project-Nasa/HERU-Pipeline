@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from heru import tarefas
-from heru.config import CAMADAS, COLUNAS_VALIDACAO, FONTES, PONTOS
+from heru.config import CAMADAS, COLUNAS_VALIDACAO, COLUNAS_VALIDACAO_MENSAL, FONTES, PONTOS
 
 MINIMO = 1000
 MODIS, SNPP, NOAA20 = CAMADAS.index("modis"), CAMADAS.index("viirs_snpp"), CAMADAS.index("viirs_noaa20")
@@ -13,6 +13,7 @@ JANELA_K20 = (2019 * 12, 2025 * 12 + 11)
 JANELA_ERRO = (2020 * 12, 2024 * 12 + 11)
 ANOS_K = range(2012, 2020)
 ANOS_K20 = range(2019, 2026)
+MESES_ERRO = np.arange(JANELA_ERRO[0], JANELA_ERRO[1] + 1)
 
 
 def zips_prontos(pasta_zips, camada, anos):
@@ -135,17 +136,34 @@ def razoes_diretas(num, den):
     return dividir(num["d"] + num["n"], total), dividir(num["d"], den["d"]), dividir(num["n"], den["n"]), total
 
 
+def do_pais(serie, pais):
+    return serie.loc[pais] if pais in serie.index.get_level_values(0) else pd.Series(dtype=float)
+
+
+def mensal(escopo, ident, snpp, modis, estimado):
+    tabela = pd.DataFrame({"viirs_snpp": snpp, "modis": modis, "modis_x_k": estimado}).reindex(MESES_ERRO).fillna(0)
+    return pd.DataFrame({
+        "scope": escopo, "id": ident, "month": [f"{m // 12}-{m % 12 + 1:02d}" for m in MESES_ERRO],
+        "viirs_snpp": tabela["viirs_snpp"].astype("int64").to_numpy(), "modis": tabela["modis"].astype("int64").to_numpy(),
+        "modis_x_k": [f"{v:.2f}" for v in tabela["modis_x_k"]],
+    })
+
+
 def validacao(grade, dia, mes_pb, fatores_atuais, pasta_zips):
     k, k20 = fatores_atuais["k"], fatores_atuais["k20"]
     if k is None and k20 is None:
-        return pd.DataFrame(columns=COLUNAS_VALIDACAO)
-    linhas = []
+        return pd.DataFrame(columns=COLUNAS_VALIDACAO), pd.DataFrame(columns=COLUNAS_VALIDACAO_MENSAL)
+    linhas, mensais = [], []
     erro_grade = grade[(grade["month"].between(*JANELA_ERRO))]
     modis_erro = erro_grade[erro_grade["layer"] == MODIS]
     snpp_erro = erro_grade[erro_grade["layer"] == SNPP]
+    metricas_mundo = (np.nan, np.nan, 0)
     if k is not None:
         modis_erro = modis_erro.assign(est=com_fator(modis_erro, k))
-    metricas_mundo = erro(modis_erro.groupby("month")["est"].sum(), snpp_erro.groupby("month")["n"].sum()) if k else (np.nan, np.nan, 0)
+        por_mes = modis_erro.groupby("month")[["n", "est"]].sum()
+        obs_mes = snpp_erro.groupby("month")["n"].sum()
+        metricas_mundo = erro(por_mes["est"], obs_mes)
+        mensais.append(mensal("world", "world", obs_mes, por_mes["n"], por_mes["est"]))
     k_mundo = (*k["global"], k["blocos"]["calib"].sum()) if k else None
     k20_mundo = (*k20["global"], k20["blocos"]["calib"].sum()) if k20 else None
     linhas.append(linha("world", "world", k_mundo, k20_mundo, metricas_mundo))
@@ -173,7 +191,8 @@ def validacao(grade, dia, mes_pb, fatores_atuais, pasta_zips):
     n_k20 = passagens(mes_pb[(mes_pb["layer"] == NOAA20) & mes_pb["month"].between(*JANELA_K20)], ["country"])
     if k is not None:
         modis_pais = mes_pb[(mes_pb["layer"] == MODIS) & mes_pb["month"].between(*JANELA_ERRO)]
-        est_pais = modis_pais.assign(est=com_fator(modis_pais, k)).groupby(["country", "month"])["est"].sum()
+        modis_pais = modis_pais.assign(est=com_fator(modis_pais, k)).groupby(["country", "month"])[["n", "est"]].sum()
+        est_pais = modis_pais["est"]
         obs_pais = snpp_mes[snpp_mes["month"].between(*JANELA_ERRO)].groupby(["country", "month"])["n"].sum()
     paises = sorted(c for c in set(m_k.index) | set(n_k20.index) if c)
     for pais in paises:
@@ -182,9 +201,9 @@ def validacao(grade, dia, mes_pb, fatores_atuais, pasta_zips):
         if k is not None and pais in m_k.index:
             r = razoes_diretas(s_k.reindex([pais]).fillna(0).iloc[0], m_k.loc[pais])
             k_vals = r
-            est = est_pais.loc[pais] if pais in est_pais.index.get_level_values(0) else pd.Series(dtype=float)
-            obs = obs_pais.loc[pais] if pais in obs_pais.index.get_level_values(0) else pd.Series(dtype=float)
+            est, obs = do_pais(est_pais, pais), do_pais(obs_pais, pais)
             metricas = erro(est, obs)
+            mensais.append(mensal("country", pais, obs, do_pais(modis_pais["n"], pais), est))
         if k20 is not None and pais in n_k20.index:
             k20_vals = razoes_diretas(s_k20.reindex([pais]).fillna(0).iloc[0], n_k20.loc[pais])
         linhas.append(linha("country", pais, k_vals, k20_vals, metricas, concordancia.get(pais, np.nan)))
@@ -195,4 +214,5 @@ def validacao(grade, dia, mes_pb, fatores_atuais, pasta_zips):
         tabela[coluna] = tabela[coluna].map(lambda v: "" if pd.isna(v) else str(int(v)))
     for coluna in ("months_used",):
         tabela.loc[tabela["k"] == "", coluna] = ""
-    return tabela.astype(object).fillna("")
+    mensal_tabela = pd.concat(mensais, ignore_index=True) if mensais else pd.DataFrame(columns=COLUNAS_VALIDACAO_MENSAL)
+    return tabela.astype(object).fillna(""), mensal_tabela[COLUNAS_VALIDACAO_MENSAL]

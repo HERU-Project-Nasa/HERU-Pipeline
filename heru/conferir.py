@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from heru.config import CAMADAS, COLUNAS_CONTAGEM, COLUNAS_PONTOS, COLUNAS_VALIDACAO, COM_PASSAGEM, SAIDA
+from heru.config import (CAMADAS, COLUNAS_CONTAGEM, COLUNAS_PONTOS, COLUNAS_VALIDACAO, COLUNAS_VALIDACAO_MENSAL,
+                         COM_PASSAGEM, SAIDA)
 
 CABECALHOS = {
     "meta/latest.csv": ["batch", "updated_at"],
@@ -15,6 +16,7 @@ CABECALHOS = {
     "meta/countries.csv": ["iso3", "name", "continent", "first_date", "last_date", "rows"],
     "meta/layers.csv": ["layer", "title", "instrument", "resolution_m", "satellites", "notes"],
     "meta/validation.csv": COLUNAS_VALIDACAO,
+    "meta/validation_monthly.csv": COLUNAS_VALIDACAO_MENSAL,
     "meta/static_sources.csv": ["lat", "lon"],
 }
 PROIBIDOS = {"nan", "NaN", "null", "NA", "None", "<NA>"}

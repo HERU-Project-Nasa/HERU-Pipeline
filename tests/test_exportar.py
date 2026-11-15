@@ -119,7 +119,30 @@ def test_k_por_bloco_e_harmonizada_por_regime(ambiente, monkeypatch):
     assert len(gzip.decompress((saida / "points/modis/2012/2012-03-31.csv.gz").read_bytes()).splitlines()) == 1
     tile = pd.read_csv(saida / "grid/tiles/-20_-65/monthly.csv", keep_default_na=False)
     assert tile["month"].tolist() == sorted(tile["month"])
+    validacao_mensal = pd.read_csv(saida / "meta/validation_monthly.csv", keep_default_na=False)
+    assert validacao_mensal.groupby("id").size().to_dict() == {"BOL": 60, "world": 60}
     assert conferir(saida) == []
+
+
+def test_validacao_mensal_compara_snpp_com_modis_vezes_k(tmp_path):
+    blocos = pd.MultiIndex.from_tuples([(0, 0)], names=["bi", "bj"])
+    k = harmonizar.fatores(pd.DataFrame({"d": [3000], "n": [300]}, index=blocos),
+                           pd.DataFrame({"d": [1000], "n": [100]}, index=blocos))
+    marco, calib = 2021 * 12 + 2, 2013 * 12
+    modis, snpp = harmonizar.MODIS, harmonizar.SNPP
+    grade = pd.DataFrame({"layer": [modis, snpp, modis], "month": [marco, marco, calib], "bi": 0, "bj": 0, "dn": 0,
+                          "n": [10, 28, 1000]})
+    dia = pd.DataFrame({"layer": snpp, "date": pd.to_datetime(["2021-03-05", "2013-01-05"]), "country": "BOL", "dn": 0,
+                        "n": [28, 3000]})
+    mes_pb = pd.DataFrame({"layer": modis, "month": [marco, calib], "country": "BOL", "bi": 0, "bj": 0, "dn": 0,
+                           "n": [10, 1000]})
+    _, mensal = harmonizar.validacao(grade, dia, mes_pb, {"k": k, "k20": None}, tmp_path)
+    assert mensal.columns.tolist() == ["scope", "id", "month", "viirs_snpp", "modis", "modis_x_k"]
+    assert len(mensal) == 120 and mensal["month"].iloc[0] == "2020-01" and mensal["month"].iloc[59] == "2024-12"
+    mundo = mensal[mensal["scope"] == "world"].set_index("month")
+    assert mundo.loc["2021-03", ["viirs_snpp", "modis", "modis_x_k"]].tolist() == [28, 10, "30.00"]
+    bolivia = mensal[mensal["id"] == "BOL"].set_index("month")
+    assert bolivia.loc["2021-03", "modis_x_k"] == "30.00" and bolivia.loc["2020-01", "viirs_snpp"] == 0
 
 
 def test_landsat_sai_com_as_6_casas_do_firms():
